@@ -2,16 +2,14 @@ package main
 
 import (
 	"fmt"
-    "github.com/five-hundred-eleven/goland-game/goland"
-	"github.com/mattn/go-gtk/gdkpixbuf"
-	"github.com/mattn/go-gtk/glib"
-	"github.com/mattn/go-gtk/gtk"
+	"github.com/five-hundred-eleven/goland-game/goland"
+	"github.com/veandco/go-sdl2/sdl"
 	"os"
 )
 
-func main() {
+const ()
 
-	msgCh := make(chan int)
+func main() {
 
 	mazeFilePath := "maze.txt"
 	if len(os.Args) > 1 {
@@ -20,32 +18,87 @@ func main() {
 
 	game, err := goland.NewGameFromFilename(mazeFilePath)
 	if err != nil {
-		println(fmt.Sprintf("Got error constructing game: %s", err))
+		fmt.Sprintln("Got error constructing game: %s", err)
 		return
 	}
 
 	println(fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows))
 
-	gtk.Init(nil)
-	window := gtk.NewWindow(gtk.WINDOW_TOPLEVEL)
-	window.SetPosition(gtk.WIN_POS_CENTER)
-	window.SetTitle("Goland!")
-	window.SetIconName("gtk-dialog-info")
-	window.Connect("destroy", func(ctx *glib.CallbackContext) {
-		println("goland got destroyed!", ctx.Data().(string))
-		msgCh <- goland.End
-		gtk.MainQuit()
-	}, "goland")
+	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
+		fmt.Sprintln("Unable to init! %s", err)
+		return
+	}
+	defer sdl.Quit()
 
-	pixbuf := gdkpixbuf.NewPixbuf(gdkpixbuf.GDK_COLORSPACE_RGB, false, 8, 640, 480)
-	img := gtk.NewImageFromPixbuf(pixbuf)
+	screen := &goland.Screen{}
+	//width, height := window.GetSize()
+	screen.Width = goland.WINDOW_WIDTH
+	screen.Height = goland.WINDOW_HEIGHT
+	// this is a constant for right triangles
+	screen.Depth = screen.Width / 2
 
-	window.Add(img)
-	window.SetSizeRequest(640, 480)
-	window.ShowAll()
+	window, err := sdl.CreateWindow("Goland!", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, goland.WINDOW_WIDTH, goland.WINDOW_HEIGHT, 0)
+	if err != nil {
+		println(fmt.Sprintf("Unable to create goland! %s", err))
+		return
+	}
 
-	go goland.DoMaze(msgCh, img, pixbuf, game)
+	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
+	if err != nil {
+		println(fmt.Sprintf("Got error in CreateRenderer(): %s", err))
+		return
+	}
+	defer renderer.Destroy()
 
-	gtk.Main()
+	surface, err := window.GetSurface()
+	if err != nil {
+		println(fmt.Sprintf("Got error in GetSurface(): %s", err))
+		return
+	}
+	screen.Format = surface.Format
+
+	texture, err := renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOW_WIDTH, goland.WINDOW_HEIGHT)
+	if err != nil {
+		println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
+		return
+	}
+	defer texture.Destroy()
+
+	screen.Window = window
+	screen.Renderer = renderer
+	screen.Texture = texture
+
+	defer window.Destroy()
+
+	sendCh := make(chan int)
+	recvCh := make(chan int)
+	go goland.DoMaze(sendCh, recvCh, screen, game)
+
+	go func() {
+		defer func() {
+			recvCh <- goland.End
+		}()
+		for {
+			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+				switch event.(type) {
+				case *sdl.QuitEvent:
+					println("Got quit event!")
+					return
+				default:
+					fmt.Sprintln("Got unrecognized event! %d", event.GetType())
+				}
+			}
+		}
+	}()
+
+	for {
+		msg := <-recvCh
+		if msg == goland.End {
+			println("Goland got destroyed!")
+			break
+		} else {
+			println("Got unrecognized message??")
+		}
+	}
 
 }
