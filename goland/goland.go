@@ -531,12 +531,15 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 								return
 							}
 			*/
+            var err error
 			numCompleted = 0
+            /*
             err := renderer.SetRenderTarget(targetTexture)
 			if err != nil {
 				println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
 				return
 			}
+            */
 			if len(completedCh) != 0 {
 				println("completedCh should be empty")
 				return
@@ -559,6 +562,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 					break
 				}
 			}
+            /*
             err = renderer.SetRenderTarget(surfaceTexture)
 			if err != nil {
 				println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
@@ -569,7 +573,8 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 				println(fmt.Sprintf("Got error in Copy(): %s", err))
 				return
 			}
-			//renderer.Present()
+            */
+			renderer.Present()
 		}
 		dur := time.Now().UnixNano() - startTime
 		if dur > 0 {
