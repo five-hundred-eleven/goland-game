@@ -32,43 +32,80 @@ func main() {
 
 	screen := &goland.Screen{}
 	//width, height := window.GetSize()
-	screen.Width = goland.WINDOW_WIDTH
-	screen.Height = goland.WINDOW_HEIGHT
+	screen.Width = goland.WINDOWWIDTH
+	screen.Height = goland.WINDOWHEIGHT
 	// this is a constant for right triangles
 	screen.Depth = screen.Width / 2
 
-	window, err := sdl.CreateWindow("Goland!", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, goland.WINDOW_WIDTH, goland.WINDOW_HEIGHT, 0)
+	screen.Window, err = sdl.CreateWindow("Goland!", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, goland.WINDOWWIDTH, goland.WINDOWHEIGHT, 0)
 	if err != nil {
 		println(fmt.Sprintf("Unable to create goland! %s", err))
 		return
 	}
+	defer screen.Window.Destroy()
 
-	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
+	screen.Renderer, err = sdl.CreateRenderer(screen.Window, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
 	if err != nil {
 		println(fmt.Sprintf("Got error in CreateRenderer(): %s", err))
 		return
 	}
-	defer renderer.Destroy()
+	defer screen.Renderer.Destroy()
 
-	surface, err := window.GetSurface()
+	surface, err := screen.Window.GetSurface()
 	if err != nil {
 		println(fmt.Sprintf("Got error in GetSurface(): %s", err))
 		return
 	}
 	screen.Format = surface.Format
-
-	texture, err := renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOW_WIDTH, goland.WINDOW_HEIGHT)
+	err = surface.SetBlendMode(sdl.BLENDMODE_ADD)
+	if err != nil {
+		println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
+		return
+	}
+	screen.TargetTexture, err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_TARGET, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
 	if err != nil {
 		println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
 		return
 	}
-	defer texture.Destroy()
+	defer screen.TargetTexture.Destroy()
+	screen.SurfaceTexture = screen.Renderer.GetRenderTarget()
+	if screen.SurfaceTexture != nil {
+		println(fmt.Sprintf("Got error in GetRenderTarget()"))
+		return
+	}
+	/*
+	   surfaceTexture, err := screen.Renderer.CreateTextureFromSurface(surface)
+	   if err != nil {
+	       println(fmt.Sprintf("Got error in CreateTextureFromSurface(): %s", err))
+	       return
+	   }
+	   defer surfaceTexture.Destroy()
+	   err = screen.Renderer.SetRenderTarget(screen.surfaceTexture)
+	   if err != nil {
+	       println(fmt.Sprintf("Got error in SetRenderTarget(): %s", err))
+	       return
+	   }
+	*/
 
-	screen.Window = window
-	screen.Renderer = renderer
-	screen.Texture = texture
-
-	defer window.Destroy()
+	segWidth := goland.WINDOWWIDTH / goland.NUMWORKERS
+	screen.SegTextures = make([]*sdl.Texture, goland.NUMWORKERS)
+	screen.Segments = make([]*sdl.Rect, goland.NUMWORKERS)
+	for i := int32(0); i < goland.NUMWORKERS; i++ {
+		screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, segWidth, goland.WINDOWHEIGHT)
+		if err != nil {
+			println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
+			return
+		}
+		defer screen.SegTextures[i].Destroy()
+		err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
+		if err != nil {
+			println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
+			return
+		}
+		screen.Segments[i] = &sdl.Rect{segWidth * i, 0, segWidth, goland.WINDOWHEIGHT}
+	}
+	screen.TargetMask = &sdl.Rect{0, 0, goland.WINDOWWIDTH, goland.WINDOWHEIGHT}
+	screen.SegMask = &sdl.Rect{0, 0, segWidth, goland.WINDOWHEIGHT}
 
 	sendCh := make(chan int)
 	recvCh := make(chan int)
