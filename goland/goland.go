@@ -403,20 +403,22 @@ func doRaytrace(completedCh chan int32, screen *Screen, segmentIx int32, game *G
 		isfilled[i-indexStart] = true
 		endpoints[i-indexStart] = endpoint
 	}
-	pixels, _, err := texture.Lock(segment)
+	pixels, _, err := texture.Lock(screen.SegMask)
 	if err != nil {
 		println(fmt.Sprintf("Got error on Lock(): %s", err))
 		return
 	}
-    println(fmt.Sprintf("Got pixels: %d, expected: %d", len(pixels), width * screen.Height * 4))
+    //println(fmt.Sprintf("Got pixels: %d, expected: %d", len(pixels), width * screen.Height * 4))
 	for row := int32(0); row < screen.Height; row++ {
 		rowStart := row * width * 4
 		for col := int32(0); col < width; col++ {
-			colStart := rowStart + (indexStart + col)*4
+			colStart := rowStart + col*4
+            /*
             if colStart >= int32(len(pixels)) {
-                println(fmt.Sprintf("Got error index: row: %d, col: %d, rowStart: %d, colStart: %d, len: %d", row, col, rowStart, colStart, len(pixels)))
+                println(fmt.Sprintf("Got error index: row: %d, col: %d, width: %d, rowStart: %d, colStart: %d, len: %d, indexStart: %d", row, col, width, rowStart, colStart, len(pixels), indexStart))
                 return
             }
+            */
 			if isfilled[col] {
 				// TODO don't do this repeatedly
 				// should probably refactor this whole function...
@@ -458,7 +460,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 	segTextures := screen.SegTextures
 	segments := screen.Segments
 	targetMask := screen.TargetMask
-	//segMask := screen.SegMask
+	segMask := screen.SegMask
 
 	widthF := float64(screen.Width)
 	depthF := float64(screen.Depth)
@@ -545,7 +547,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			for {
 				indexCompleted := <-completedCh
 				numCompleted++
-				err := renderer.Copy(segTextures[indexCompleted], segments[indexCompleted], segments[indexCompleted])
+				err := renderer.Copy(segTextures[indexCompleted], segMask, segments[indexCompleted])
 				if err != nil {
 					println(fmt.Sprintf("Got error in Copy(): %s", err))
 					return
@@ -567,7 +569,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 				println(fmt.Sprintf("Got error in Copy(): %s", err))
 				return
 			}
-			renderer.Present()
+			//renderer.Present()
 		}
 		dur := time.Now().UnixNano() - startTime
 		if dur > 0 {

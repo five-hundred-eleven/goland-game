@@ -96,6 +96,7 @@ func main() {
 			println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
 			return
 		}
+        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
 		defer screen.SegTextures[i].Destroy()
 		err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
 		if err != nil {
