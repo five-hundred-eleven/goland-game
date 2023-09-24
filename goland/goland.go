@@ -424,19 +424,24 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 				}
 			}
 			if isUpper {
-				rayvec := rotated[col]
-				ceilpoint1 := rayvec.advance(ceilDist)
-				if player.isVisited(ceilpoint1.Point) {
-					data[colStart] = 0
-					data[colStart+1] = 0
-					data[colStart+2] = 255
+				if ceilDist < 256 {
+					rayvec := rotated[col]
+					ceilpoint1 := rayvec.advance(ceilDist)
+					if player.isVisited(ceilpoint1.Point) {
+						data[colStart] = 0
+						data[colStart+1] = 0
+						data[colStart+2] = 255
+						continue
+					}
+				}
+			} else {
+				if floorDist < 256 {
+					x := math.Log(floorDist)
+					data[colStart] = byte(17 - x*3)
+					data[colStart+1] = byte(17 - x*3)
+					data[colStart+2] = byte(85 - x*15)
 					continue
 				}
-			} else if floorDist < 256 {
-				x := math.Log(floorDist)
-				data[colStart] = byte(17 - x*3)
-				data[colStart+1] = byte(17 - x*3)
-				data[colStart+2] = byte(85 - x*15)
 			}
 		}
 		rayCh <- Ray{rowStart, data}
