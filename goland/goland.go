@@ -34,6 +34,7 @@ const (
 	VELOCITY           = 0.5
 	ROTVEL             = 0.075
 	WALLHEIGHT         = 5.0
+	FLOORHEIGHT        = -5.0
 	CEILHEIGHT         = 6.5
 )
 
@@ -400,7 +401,13 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 		data := make([]byte, width*4)
 		isUpper := math.Signbit(screen.VAngles[row])
 		abssin := math.Abs(math.Sin(screen.VAngles[row]))
-		ceilDist1 := math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[row]))
+		floorDist := math.NaN()
+		ceilDist := math.NaN()
+		if !isUpper {
+			floorDist = math.Abs(FLOORHEIGHT / math.Tan(screen.VAngles[row]))
+		} else {
+			ceilDist = math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[row]))
+		}
 		for col := int32(0); col < width; col++ {
 			colStart := col * 4
 			if isfilled[col] {
@@ -418,13 +425,18 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 			}
 			if isUpper {
 				rayvec := rotated[col]
-				ceilpoint1 := rayvec.advance(ceilDist1)
+				ceilpoint1 := rayvec.advance(ceilDist)
 				if player.isVisited(ceilpoint1.Point) {
 					data[colStart] = 0
 					data[colStart+1] = 0
 					data[colStart+2] = 255
 					continue
 				}
+			} else if floorDist < 256 {
+				x := math.Log(floorDist)
+				data[colStart] = byte(17 - x*3)
+				data[colStart+1] = byte(17 - x*3)
+				data[colStart+2] = byte(85 - x*15)
 			}
 		}
 		rayCh <- Ray{rowStart, data}
