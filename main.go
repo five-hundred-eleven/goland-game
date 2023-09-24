@@ -62,7 +62,7 @@ func main() {
 		println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
 		return
 	}
-	screen.TargetTexture, err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_TARGET, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
+	screen.TargetTexture, err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
 	if err != nil {
 		println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
 		return

@@ -387,7 +387,7 @@ func doRaytrace(completedCh chan int32, screen *Screen, segmentIx int32, game *G
 		completedCh <- segmentIx
 	}()
 	//println(fmt.Sprintf("doRaytrace(): indexstart: %d, indexStop: %d, dir: %f", indexStart, indexStop, player.Dir))
-	texture := screen.SegTextures[segmentIx]
+	texture := screen.TargetTexture
 	segment := screen.Segments[segmentIx]
 	width := segment.W
 	indexStart := segment.X
@@ -403,16 +403,16 @@ func doRaytrace(completedCh chan int32, screen *Screen, segmentIx int32, game *G
 		isfilled[i-indexStart] = true
 		endpoints[i-indexStart] = endpoint
 	}
-	pixels, _, err := texture.Lock(screen.SegMask)
+	pixels, _, err := texture.Lock(segment)
 	if err != nil {
 		println(fmt.Sprintf("Got error on Lock(): %s", err))
 		return
 	}
     //println(fmt.Sprintf("Got pixels: %d, expected: %d", len(pixels), width * screen.Height * 4))
 	for row := int32(0); row < screen.Height; row++ {
-		rowStart := row * width * 4
+		rowStart := row * screen.Width * 4
 		for col := int32(0); col < width; col++ {
-			colStart := rowStart + col*4
+			colStart := rowStart + (indexStart + col)*4
             /*
             if colStart >= int32(len(pixels)) {
                 println(fmt.Sprintf("Got error index: row: %d, col: %d, width: %d, rowStart: %d, colStart: %d, len: %d, indexStart: %d", row, col, width, rowStart, colStart, len(pixels), indexStart))
@@ -456,8 +456,8 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 
 	renderer := screen.Renderer
 	//surfaceTexture := screen.SurfaceTexture
-	//targetTexture := screen.TargetTexture
-	segTextures := screen.SegTextures
+	targetTexture := screen.TargetTexture
+	//segTextures := screen.SegTextures
 	segments := screen.Segments
 	//targetMask := screen.TargetMask
 	segMask := screen.SegMask
@@ -550,7 +550,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			for {
 				indexCompleted := <-completedCh
 				numCompleted++
-				err := renderer.Copy(segTextures[indexCompleted], segMask, segments[indexCompleted])
+				err := renderer.Copy(targetTexture, segments[indexCompleted], segments[indexCompleted])
 				if err != nil {
 					println(fmt.Sprintf("Got error in Copy(): %s", err))
 					return
