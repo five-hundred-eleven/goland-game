@@ -29,8 +29,8 @@ const (
 	TWOPI              = math.Pi * 2.0
 	MICRO              = 0.0000001
 	SHEARFACTOR        = 1.00
-	WINDOWWIDTH  int32 = 640
-	WINDOWHEIGHT int32 = 480
+	WINDOWWIDTH  int32 = 800
+	WINDOWHEIGHT int32 = 600
 )
 
 type Point struct {
@@ -260,11 +260,11 @@ func (p *Player) move() {
 	} else {
 		p.Y -= py
 	}
-	p.Dir = math.Mod(p.Dir+p.RotVel, TWOPI)
+	p.Dir = math.Mod(p.Dir+p.RotVel+TWOPI, TWOPI)
 }
 
 func (p *Player) rotate(rot float64) *Vector {
-	return &Vector{Point{p.X, p.Y}, math.Mod(p.Dir+rot, TWOPI)}
+	return &Vector{Point{p.X, p.Y}, math.Mod(p.Dir+rot+TWOPI, TWOPI)}
 }
 
 func (vec *Vector) advance(dist float64) (res *Vector) {
@@ -295,7 +295,9 @@ func LLBoundary(p Point) Point {
 }
 
 func doSingleRay(game *Game, vec *Vector) Point {
-	if vec.Dir < THREEO {
+    if vec.Dir < MIDNIGHT {
+        return rayLL(game, vec)
+    } else if vec.Dir < THREEO {
 		return rayLR(game, vec)
 	} else if vec.Dir < SIXO {
 		return rayUR(game, vec)
@@ -635,6 +637,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		}
 		numFrames++
 		game.Players[0].move()
+        //println(fmt.Sprintf("Player direction: %f", game.Players[0].Dir))
 	}
 
 }

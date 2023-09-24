@@ -152,10 +152,10 @@ func main() {
 							break
 						}
 					} else {
-						println("Got unrecognized keyboard event")
+						//println("Got unrecognized keyboard event")
 					}
 				default:
-					println(fmt.Sprintf("Got unrecognized event! %d", event.GetType()))
+					//println(fmt.Sprintf("Got unrecognized event! %d", event.GetType()))
 				}
 			}
 		}
