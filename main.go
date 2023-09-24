@@ -91,18 +91,20 @@ func main() {
 	screen.SegTextures = make([]*sdl.Texture, goland.NUMWORKERS)
 	screen.Segments = make([]*sdl.Rect, goland.NUMWORKERS)
 	for i := int32(0); i < goland.NUMWORKERS; i++ {
-		screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, segWidth, goland.WINDOWHEIGHT)
-		if err != nil {
-			println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
-			return
-		}
-        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
-		defer screen.SegTextures[i].Destroy()
-		err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
-		if err != nil {
-			println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
-			return
-		}
+		/*
+				screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
+				if err != nil {
+					println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
+					return
+				}
+		        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
+				defer screen.SegTextures[i].Destroy()
+				err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
+				if err != nil {
+					println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
+					return
+				}
+		*/
 		screen.Segments[i] = &sdl.Rect{segWidth * i, 0, segWidth, goland.WINDOWHEIGHT}
 	}
 	screen.TargetMask = &sdl.Rect{0, 0, goland.WINDOWWIDTH, goland.WINDOWHEIGHT}
@@ -118,12 +120,42 @@ func main() {
 		}()
 		for {
 			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-				switch event.(type) {
+				switch e := event.(type) {
 				case *sdl.QuitEvent:
 					println("Got quit event!")
 					return
+				case *sdl.KeyboardEvent:
+					if e.Type == sdl.KEYDOWN {
+						switch e.Keysym.Scancode {
+						case sdl.SCANCODE_W:
+							game.Players[0].Velocity = 0.3
+							break
+						case sdl.SCANCODE_S:
+							game.Players[0].Velocity = -0.3
+							break
+						case sdl.SCANCODE_A:
+							game.Players[0].RotVel = -0.1
+							break
+						case sdl.SCANCODE_D:
+							game.Players[0].RotVel = 0.1
+							break
+						}
+					} else if e.Type == sdl.KEYUP {
+						switch e.Keysym.Scancode {
+						case sdl.SCANCODE_W:
+						case sdl.SCANCODE_S:
+							game.Players[0].Velocity = 0.0
+							break
+						case sdl.SCANCODE_A:
+						case sdl.SCANCODE_D:
+							game.Players[0].RotVel = 0.0
+							break
+						}
+					} else {
+						println("Got unrecognized keyboard event")
+					}
 				default:
-					fmt.Sprintln("Got unrecognized event! %d", event.GetType())
+					println(fmt.Sprintf("Got unrecognized event! %d", event.GetType()))
 				}
 			}
 		}

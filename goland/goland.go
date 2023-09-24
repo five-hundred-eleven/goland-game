@@ -28,7 +28,7 @@ const (
 	TENTHIRTY          = math.Pi * 1.75
 	TWOPI              = math.Pi * 2.0
 	MICRO              = 0.0000001
-	SHEARFACTOR        = 1.05
+	SHEARFACTOR        = 1.00
 	WINDOWWIDTH  int32 = 640
 	WINDOWHEIGHT int32 = 480
 )
@@ -45,7 +45,7 @@ type Vector struct {
 type Game struct {
 	Cols, Rows int
 	Grid       []bool
-	Players    []*Vector
+	Players    []*Player
 }
 
 type Screen struct {
@@ -60,6 +60,17 @@ type Screen struct {
 	TargetMask           *sdl.Rect
 	SegMask              *sdl.Rect
 	Format               *sdl.PixelFormat
+}
+
+type Player struct {
+	Vector
+	Velocity, RotVel float64
+	Game             *Game
+}
+
+type Ray struct {
+	PixelStart int32
+	Data       []byte
 }
 
 func NewGameFromFilename(filename string) (game *Game, err error) {
@@ -122,11 +133,11 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 	}
 	println(fmt.Sprintf("expecting arr: %d x %d", numCols, numRows))
 	game = &Game{}
-	game.Rows = numRows
-	game.Cols = numCols
+	game.Rows = numRows * 2
+	game.Cols = numCols * 2
 	mazeSize := numRows * numCols
-	game.Grid = make([]bool, mazeSize)
-	game.Players = append(game.Players, &Vector{Point{float64(startX), float64(startY)}, float64(startDirection)})
+	game.Grid = make([]bool, mazeSize*4)
+	game.Players = append(game.Players, &Player{Vector{Point{float64(startX) * 2, float64(startY) * 2}, float64(startDirection)}, 0.0, 0.0, game})
 	mazePos := 0
 
 	// change scanning strategy- newline chars are a valid possibility in our input maze
@@ -144,6 +155,8 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 		}
 		mazebufStr := scanner.Text()
 		for i, repByte := range mazebufStr {
+			row := (mazePos / numCols) * 2
+			col := (mazePos % numCols) * 2
 			rep := int(repByte)
 			if mazePos >= mazeSize {
 				game = nil
@@ -151,9 +164,15 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 				return
 			}
 			if rep == 1 {
-				game.Grid[mazePos] = true
+				game.Grid[row*game.Cols+col] = true
+				game.Grid[row*game.Cols+col+1] = true
+				game.Grid[(row+1)*game.Cols+col] = true
+				game.Grid[(row+1)*game.Cols+col+1] = true
 			} else if rep == 0 {
-				game.Grid[mazePos] = false
+				game.Grid[row*game.Cols+col] = false
+				game.Grid[row*game.Cols+col+1] = false
+				game.Grid[(row+1)*game.Cols+col] = false
+				game.Grid[(row+1)*game.Cols+col+1] = false
 			} else {
 				game = nil
 				err = errors.New(fmt.Sprintf("Got invalid byte: %d", rep))
@@ -220,12 +239,32 @@ func getDist(p1, p2 Point) float64 {
 	return math.Sqrt(xx*xx + yy*yy)
 }
 
-func (vec *Vector) rotate(rot float64) {
-	vec.Dir = math.Mod(vec.Dir + rot, TWOPI)
+func (p *Player) move() {
+	px := p.Velocity * math.Sin(p.Dir)
+	py := p.Velocity * math.Cos(p.Dir)
+	pp := Point{
+		p.X + px*10,
+		p.Y,
+	}
+	if !p.Game.isEndpoint(pp) {
+		p.X += px
+	} else {
+		p.X -= px
+	}
+	pp = Point{
+		p.X,
+		p.Y + py*10,
+	}
+	if !p.Game.isEndpoint(pp) {
+		p.Y += py
+	} else {
+		p.Y -= py
+	}
+	p.Dir = math.Mod(p.Dir+p.RotVel, TWOPI)
 }
 
-func (vec *Vector) rotated(rot float64) (*Vector) {
-	return &Vector{Point{vec.X, vec.Y}, math.Mod(vec.Dir + rot, TWOPI)}
+func (p *Player) rotate(rot float64) *Vector {
+	return &Vector{Point{p.X, p.Y}, math.Mod(p.Dir+rot, TWOPI)}
 }
 
 func (vec *Vector) advance(dist float64) (res *Vector) {
@@ -255,7 +294,7 @@ func LLBoundary(p Point) Point {
 	return Point{X: math.Floor(p.X) - MICRO, Y: math.Ceil(p.Y) + MICRO}
 }
 
-func ray(game *Game, vec *Vector) Point {
+func doSingleRay(game *Game, vec *Vector) Point {
 	if vec.Dir < THREEO {
 		return rayLR(game, vec)
 	} else if vec.Dir < SIXO {
@@ -268,7 +307,7 @@ func ray(game *Game, vec *Vector) Point {
 
 func rayLR(game *Game, vec *Vector) Point {
 	p1 := Point{vec.X, vec.Y}
-	advanced := vec.advance(150)
+	advanced := vec.advance(255)
 	p2 := Point{advanced.X, advanced.Y}
 	for {
 		p3 := LLBoundary(p1)
@@ -382,68 +421,65 @@ func rayLL(game *Game, vec *Vector) Point {
 	return Point{math.NaN(), math.NaN()}
 }
 
-func doRaytrace(completedCh chan int32, screen *Screen, segmentIx int32, game *Game, player *Vector) {
+func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player) {
 	defer func() {
 		completedCh <- segmentIx
 	}()
 	//println(fmt.Sprintf("doRaytrace(): indexstart: %d, indexStop: %d, dir: %f", indexStart, indexStop, player.Dir))
-	texture := screen.TargetTexture
+	//texture := screen.SegTextures[segmentIx]
 	segment := screen.Segments[segmentIx]
+	//println(fmt.Sprintf("got segment: X: %d Y: %d W: %d H: %d", segment.X, segment.Y, segment.W, segment.H))
 	width := segment.W
 	indexStart := segment.X
 	indexStop := indexStart + width
 	isfilled := make([]bool, width)
 	endpoints := make([]Point, width)
 	for i := indexStart; i < indexStop; i++ {
-		rayvec := player.rotated(screen.HAngles[i])
-		endpoint := ray(game, rayvec)
+		rayvec := player.rotate(screen.HAngles[i])
+		endpoint := doSingleRay(game, rayvec)
 		if math.IsNaN(endpoint.X) {
 			continue
 		}
 		isfilled[i-indexStart] = true
 		endpoints[i-indexStart] = endpoint
 	}
-	pixels, _, err := texture.Lock(segment)
-	if err != nil {
-		println(fmt.Sprintf("Got error on Lock(): %s", err))
-		return
-	}
-    //println(fmt.Sprintf("Got pixels: %d, expected: %d", len(pixels), width * screen.Height * 4))
+	/*
+		pixels, pitch, err := texture.Lock(segment)
+		if err != nil {
+			println(fmt.Sprintf("Got error on Lock(): %s", err))
+			return
+		}
+	    println(fmt.Sprintf("%d: Got pixels: %d, expected: %d, pitch: %d", segmentIx, len(pixels), screen.Width * screen.Height * 4, pitch))
+	*/
 	for row := int32(0); row < screen.Height; row++ {
-		rowStart := row * screen.Width * 4
+		rowStart := (row*screen.Width + indexStart) * 4
+		data := make([]byte, width*4)
 		for col := int32(0); col < width; col++ {
-			colStart := rowStart + (indexStart + col)*4
-            /*
-            if colStart >= int32(len(pixels)) {
-                println(fmt.Sprintf("Got error index: row: %d, col: %d, width: %d, rowStart: %d, colStart: %d, len: %d, indexStart: %d", row, col, width, rowStart, colStart, len(pixels), indexStart))
-                return
-            }
-            */
+			colStart := col * 4
+			/*
+			   if colStart >= int32(len(pixels)) {
+			       println(fmt.Sprintf("Got error index: row: %d, col: %d, width: %d, rowStart: %d, colStart: %d, len: %d, indexStart: %d", row, col, width, rowStart, colStart, len(pixels), indexStart))
+			       return
+			   }
+			*/
 			if isfilled[col] {
 				// TODO don't do this repeatedly
 				// should probably refactor this whole function...
-				dist := getDist(player.Point, endpoints[col])
+				xDist := getDist(player.Point, endpoints[col])
+				yDist := math.Abs(math.Sin(screen.VAngles[row]) * xDist)
 				//x := math.Abs(math.Cos(screen.VAngles[row])*dist)
-				if 5.0 > math.Abs(math.Sin(screen.VAngles[row])*dist) {
-					pixels[colStart] = 127
-					pixels[colStart+1] = 127
-					pixels[colStart+2] = 127
-					pixels[colStart+3] = 255
-				} else {
-					pixels[colStart] = 0
-					pixels[colStart+1] = 0
-					pixels[colStart+2] = 0
-					pixels[colStart+3] = 255
+				if 5.0 > yDist {
+					//println("Submitted pixel")
+					x := byte(255) - byte(math.Log(xDist+yDist*2)*45)
+					data[colStart] = x
+					data[colStart+1] = x
+					data[colStart+2] = x
 				}
-			} else {
-				pixels[colStart] = 0
-				pixels[colStart+1] = 0
-				pixels[colStart+2] = 0
-				pixels[colStart+3] = 255
 			}
 		}
+		rayCh <- Ray{rowStart, data}
 	}
-	texture.Unlock()
+	//texture.Unlock()
 }
 
 func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
@@ -458,31 +494,37 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 	//surfaceTexture := screen.SurfaceTexture
 	targetTexture := screen.TargetTexture
 	//segTextures := screen.SegTextures
-	segments := screen.Segments
+	//segments := screen.Segments
 	//targetMask := screen.TargetMask
-	segMask := screen.SegMask
+	//segMask := screen.SegMask
 
+	screen.HAngles = make([]float64, screen.Width)
 	widthF := float64(screen.Width)
 	depthF := float64(screen.Depth)
-	screen.HAngles = make([]float64, screen.Width)
 	r := widthF/2 + 0.5
 	rRaised := math.Pow(r, SHEARFACTOR)
 	exp := math.Log(r) / math.Log(rRaised)
 	inc := rRaised / widthF
+	/*
+	   incF := math.Pi / widthF / 2
+	*/
 	L := (screen.Width - 1) / 2
 	R := screen.Width / 2
 	for i := int32(0); i < screen.Width/2; i++ {
 		xBase := 0.5 + (float64(i) * inc)
 		xRaised := math.Pow(xBase, exp)
 		xFinal := math.Atan(xRaised / depthF)
+		/*
+		   xFinal := (0.5 + float64(i)) * incF
+		*/
 		il := L - i
 		ir := R + i
 		screen.HAngles[il] = -xFinal
 		screen.HAngles[ir] = xFinal
 	}
 
-	heightF := float64(screen.Height)
 	screen.VAngles = make([]float64, screen.Height)
+	heightF := float64(screen.Height)
 	r = heightF/2 + 0.5
 	rRaised = math.Pow(r, SHEARFACTOR)
 	exp = math.Log(r) / math.Log(rRaised)
@@ -493,6 +535,9 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		xBase := 0.5 + (float64(i) * inc)
 		xRaised := math.Pow(xBase, exp)
 		xFinal := math.Atan(xRaised / depthF)
+		/*
+		   xFinal := (0.5 + float64(i)) * incF
+		*/
 		iu := U - i
 		id := D + i
 		screen.VAngles[iu] = -xFinal
@@ -500,6 +545,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 	}
 
 	completedCh := make(chan int32)
+	rayCh := make(chan Ray)
 	intervalDurSec := int64(1e9)
 	intervalStartSec := time.Now().UnixNano()
 	numFrames := 0
@@ -519,61 +565,68 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			}
 			println("you goofed")
 		default:
-			/*
-				            err := renderer.SetDrawColor(0, 0, 0, 255)
-				            if err != nil {
-				                println(fmt.Sprintf("Got error on SetDrawColor(): %s", err))
-				                return
-				            }
-							err = renderer.Clear()
-							if err != nil {
-								println(fmt.Sprintf("Got error on Clear(): %s", err))
-								return
-							}
-			*/
-            //var err error
-			numCompleted = 0
-            /*
-            err := renderer.SetRenderTarget(targetTexture)
+			var err error
+			err = renderer.SetDrawColor(0, 0, 0, 255)
 			if err != nil {
-				println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
+				println(fmt.Sprintf("Got error on SetDrawColor(): %s", err))
 				return
 			}
-            */
+			err = renderer.Clear()
+			if err != nil {
+				println(fmt.Sprintf("Got error on Clear(): %s", err))
+				return
+			}
+			numCompleted = 0
+			/*
+			            err := renderer.SetRenderTarget(targetTexture)
+						if err != nil {
+							println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
+							return
+						}
+			*/
 			if len(completedCh) != 0 {
 				println("completedCh should be empty")
 				return
 			}
 			for i := int32(0); i < NUMWORKERS; i++ {
-				go doRaytrace(completedCh, screen, i, game, player)
+				go doRaytrace(completedCh, rayCh, screen, i, game, player)
 			}
+			pixels, _, err := targetTexture.Lock(nil)
+			if err != nil {
+				println(fmt.Sprintf("Got err from Lock(): %s", err))
+				return
+			}
+			//println(fmt.Sprintf("len(pixels): %d, pitch: %d, expected: %d", len(pixels), pitch, screen.Width * screen.Height * 4))
 			for {
-				indexCompleted := <-completedCh
-				numCompleted++
-				err := renderer.Copy(targetTexture, segments[indexCompleted], segments[indexCompleted])
-				if err != nil {
-					println(fmt.Sprintf("Got error in Copy(): %s", err))
-					return
+				select {
+				case <-completedCh:
+					//println("got completedCh")
+					numCompleted++
+				case rayItem := <-rayCh:
+					//println(fmt.Sprintf("Got ray item: %d %d %d %d", rayItem.PixelStart, rayItem.R, rayItem.G, rayItem.B))
+					pixelStart := rayItem.PixelStart
+					pixelStop := pixelStart + int32(len(rayItem.Data))
+					copy(pixels[pixelStart:pixelStop], rayItem.Data)
 				}
 				if numCompleted >= NUMWORKERS {
-					if len(completedCh) != 0 {
-						println("completedCh should be empty")
-					}
 					break
 				}
 			}
-            /*
-            err = renderer.SetRenderTarget(surfaceTexture)
-			if err != nil {
-				println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
-				return
-			}
-			err = renderer.Copy(targetTexture, targetMask, targetMask)
-			if err != nil {
-				println(fmt.Sprintf("Got error in Copy(): %s", err))
-				return
-			}
-            */
+			//println("got past loop")
+			targetTexture.Unlock()
+			renderer.Copy(targetTexture, nil, nil)
+			/*
+			            err = renderer.SetRenderTarget(surfaceTexture)
+						if err != nil {
+							println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
+							return
+						}
+						err = renderer.Copy(targetTexture, targetMask, targetMask)
+						if err != nil {
+							println(fmt.Sprintf("Got error in Copy(): %s", err))
+							return
+						}
+			*/
 			renderer.Present()
 		}
 		dur := time.Now().UnixNano() - startTime
@@ -581,7 +634,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			time.Sleep(time.Duration(FRAMERATE-dur) * time.Nanosecond)
 		}
 		numFrames++
-		game.Players[0].rotate(0.01)
+		game.Players[0].move()
 	}
 
 }
