@@ -128,13 +128,13 @@ func main() {
 					if e.Type == sdl.KEYDOWN {
 						switch e.Keysym.Scancode {
 						case sdl.SCANCODE_W:
-							game.Players[0].Velocity = 0.5
+							game.Players[0].Velocity = goland.VELOCITY
 						case sdl.SCANCODE_S:
-							game.Players[0].Velocity = -0.5
+							game.Players[0].Velocity = -goland.VELOCITY
 						case sdl.SCANCODE_A:
-							game.Players[0].RotVel = -0.1
+							game.Players[0].RotVel = -goland.ROTVEL
 						case sdl.SCANCODE_D:
-							game.Players[0].RotVel = 0.1
+							game.Players[0].RotVel = goland.ROTVEL
 						}
 					} else if e.Type == sdl.KEYUP {
 						switch e.Keysym.Scancode {
