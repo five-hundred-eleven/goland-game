@@ -116,7 +116,7 @@ func main() {
 
 	go func() {
 		defer func() {
-			recvCh <- goland.End
+			sendCh <- goland.End
 		}()
 		for {
 			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
