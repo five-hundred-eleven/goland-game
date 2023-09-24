@@ -29,8 +29,8 @@ const (
 	TWOPI              = math.Pi * 2.0
 	MICRO              = 0.0000001
 	SHEARFACTOR        = 1.00
-	WINDOWWIDTH  int32 = 800
-	WINDOWHEIGHT int32 = 600
+	WINDOWWIDTH  int32 = 1280
+	WINDOWHEIGHT int32 = 960
 )
 
 type Point struct {
@@ -295,101 +295,52 @@ func LLBoundary(p Point) Point {
 }
 
 func doSingleRay(game *Game, vec *Vector) Point {
-    if vec.Dir < MIDNIGHT {
-        return rayLL(game, vec)
-    } else if vec.Dir < THREEO {
-		return rayLR(game, vec)
-	} else if vec.Dir < SIXO {
-		return rayUR(game, vec)
-	} else if vec.Dir < NINEO {
-		return rayUL(game, vec)
-	}
-	return rayLL(game, vec)
-}
-
-func rayLR(game *Game, vec *Vector) Point {
-	p1 := Point{vec.X, vec.Y}
+	var p1, p2, p3, p4 Point
+	p1 = vec.Point
 	advanced := vec.advance(255)
-	p2 := Point{advanced.X, advanced.Y}
-	for {
-		p3 := LLBoundary(p1)
-		p4 := LRBoundary(p1)
-		intersection := segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
-			}
-			p1 = intersection
-			continue
-		}
-		p3 = URBoundary(p1)
-		intersection = segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
-			}
-			p1 = intersection
-			continue
-		}
-		break
+	p2 = advanced.Point
+	startIx := 0
+	if vec.Dir < THREEO {
+		startIx = 1
+	} else if vec.Dir < SIXO {
+		startIx = 2
+	} else if vec.Dir < NINEO {
+		startIx = 3
+	} else {
+		startIx = 0
 	}
-	return Point{math.NaN(), math.NaN()}
-}
-
-func rayUR(game *Game, vec *Vector) Point {
-	p1 := Point{vec.X, vec.Y}
-	advanced := vec.advance(150)
-	p2 := Point{advanced.X, advanced.Y}
 	for {
-		p3 := ULBoundary(p1)
-		p4 := URBoundary(p1)
-		intersection := segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
+		isUpdated := false
+		for i := 0; i < 4; i++ {
+			switch (startIx + i) % 4 {
+			case 0:
+				p3 = LLBoundary(p1)
+				p4 = ULBoundary(p1)
+			case 1:
+				p3 = ULBoundary(p1)
+				p4 = URBoundary(p1)
+			case 2:
+				p3 = URBoundary(p1)
+				p4 = LRBoundary(p1)
+			case 3:
+				p3 = LRBoundary(p1)
+				p4 = LLBoundary(p1)
+			default:
+				return Point{math.NaN(), math.NaN()}
 			}
-			p1 = intersection
-			continue
-		}
-		p3 = LRBoundary(p1)
-		intersection = segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
+			intersection := segmentIntersection(p1, p2, p3, p4)
+			if !math.IsNaN(intersection.X) {
+				if game.isEndpoint(intersection) {
+					return intersection
+				}
+				isUpdated = true
+				p1 = intersection
+				break
 			}
-			p1 = intersection
-			continue
 		}
-		break
-	}
-	return Point{math.NaN(), math.NaN()}
-}
-
-func rayUL(game *Game, vec *Vector) Point {
-	p1 := Point{vec.X, vec.Y}
-	advanced := vec.advance(150)
-	p2 := Point{advanced.X, advanced.Y}
-	for {
-		p3 := LLBoundary(p1)
-		p4 := ULBoundary(p1)
-		intersection := segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
-			}
-			p1 = intersection
-			continue
+		if !isUpdated {
+			break
 		}
-		p3 = URBoundary(p1)
-		intersection = segmentIntersection(p1, p2, p3, p4)
-		if !math.IsNaN(intersection.X) {
-			if game.isEndpoint(intersection) {
-				return intersection
-			}
-			p1 = intersection
-			continue
-		}
-		break
 	}
 	return Point{math.NaN(), math.NaN()}
 }
@@ -420,6 +371,7 @@ func rayLL(game *Game, vec *Vector) Point {
 		}
 		break
 	}
+	println(fmt.Sprintf("Got NaN endpoint LL, dir: %f", vec.Dir))
 	return Point{math.NaN(), math.NaN()}
 }
 
@@ -435,7 +387,8 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 	indexStart := segment.X
 	indexStop := indexStart + width
 	isfilled := make([]bool, width)
-	endpoints := make([]Point, width)
+	dists := make([]float64, width)
+	abssins := make([]float64, len(screen.VAngles))
 	for i := indexStart; i < indexStop; i++ {
 		rayvec := player.rotate(screen.HAngles[i])
 		endpoint := doSingleRay(game, rayvec)
@@ -443,16 +396,19 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 			continue
 		}
 		isfilled[i-indexStart] = true
-		endpoints[i-indexStart] = endpoint
+		dists[i-indexStart] = getDist(player.Point, endpoint)
 	}
 	/*
-		pixels, pitch, err := texture.Lock(segment)
-		if err != nil {
-			println(fmt.Sprintf("Got error on Lock(): %s", err))
-			return
-		}
-	    println(fmt.Sprintf("%d: Got pixels: %d, expected: %d, pitch: %d", segmentIx, len(pixels), screen.Width * screen.Height * 4, pitch))
+			pixels, pitch, err := texture.Lock(segment)
+			if err != nil {
+				println(fmt.Sprintf("Got error on Lock(): %s", err))
+				return
+			}
+		    println(fmt.Sprintf("%d: Got pixels: %d, expected: %d, pitch: %d", segmentIx, len(pixels), screen.Width * screen.Height * 4, pitch))
 	*/
+	for i := 0; i < len(abssins); i++ {
+		abssins[i] = math.Abs(math.Sin(screen.VAngles[i]))
+	}
 	for row := int32(0); row < screen.Height; row++ {
 		rowStart := (row*screen.Width + indexStart) * 4
 		data := make([]byte, width*4)
@@ -467,8 +423,8 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 			if isfilled[col] {
 				// TODO don't do this repeatedly
 				// should probably refactor this whole function...
-				xDist := getDist(player.Point, endpoints[col])
-				yDist := math.Abs(math.Sin(screen.VAngles[row]) * xDist)
+				xDist := dists[col]
+				yDist := abssins[row] * xDist
 				//x := math.Abs(math.Cos(screen.VAngles[row])*dist)
 				if 5.0 > yDist {
 					//println("Submitted pixel")
@@ -580,11 +536,11 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			}
 			numCompleted = 0
 			/*
-			            err := renderer.SetRenderTarget(targetTexture)
-						if err != nil {
-							println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
-							return
-						}
+				            err := renderer.SetRenderTarget(targetTexture)
+							if err != nil {
+								println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
+								return
+							}
 			*/
 			if len(completedCh) != 0 {
 				println("completedCh should be empty")
@@ -618,16 +574,16 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			targetTexture.Unlock()
 			renderer.Copy(targetTexture, nil, nil)
 			/*
-			            err = renderer.SetRenderTarget(surfaceTexture)
-						if err != nil {
-							println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
-							return
-						}
-						err = renderer.Copy(targetTexture, targetMask, targetMask)
-						if err != nil {
-							println(fmt.Sprintf("Got error in Copy(): %s", err))
-							return
-						}
+				            err = renderer.SetRenderTarget(surfaceTexture)
+							if err != nil {
+								println(fmt.Sprintf("Got error in SetRenderTarget: %s", err))
+								return
+							}
+							err = renderer.Copy(targetTexture, targetMask, targetMask)
+							if err != nil {
+								println(fmt.Sprintf("Got error in Copy(): %s", err))
+								return
+							}
 			*/
 			renderer.Present()
 		}
@@ -637,7 +593,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		}
 		numFrames++
 		game.Players[0].move()
-        //println(fmt.Sprintf("Player direction: %f", game.Players[0].Dir))
+		//println(fmt.Sprintf("Player direction: %f", game.Players[0].Dir))
 	}
 
 }

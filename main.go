@@ -92,18 +92,18 @@ func main() {
 	screen.Segments = make([]*sdl.Rect, goland.NUMWORKERS)
 	for i := int32(0); i < goland.NUMWORKERS; i++ {
 		/*
-				screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
-				if err != nil {
-					println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
-					return
-				}
-		        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
-				defer screen.SegTextures[i].Destroy()
-				err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
-				if err != nil {
-					println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
-					return
-				}
+					screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
+					if err != nil {
+						println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
+						return
+					}
+			        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
+					defer screen.SegTextures[i].Destroy()
+					err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
+					if err != nil {
+						println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
+						return
+					}
 		*/
 		screen.Segments[i] = &sdl.Rect{segWidth * i, 0, segWidth, goland.WINDOWHEIGHT}
 	}
@@ -128,28 +128,24 @@ func main() {
 					if e.Type == sdl.KEYDOWN {
 						switch e.Keysym.Scancode {
 						case sdl.SCANCODE_W:
-							game.Players[0].Velocity = 0.3
-							break
+							game.Players[0].Velocity = 0.5
 						case sdl.SCANCODE_S:
-							game.Players[0].Velocity = -0.3
-							break
+							game.Players[0].Velocity = -0.5
 						case sdl.SCANCODE_A:
 							game.Players[0].RotVel = -0.1
-							break
 						case sdl.SCANCODE_D:
 							game.Players[0].RotVel = 0.1
-							break
 						}
 					} else if e.Type == sdl.KEYUP {
 						switch e.Keysym.Scancode {
 						case sdl.SCANCODE_W:
+							game.Players[0].Velocity = 0.0
 						case sdl.SCANCODE_S:
 							game.Players[0].Velocity = 0.0
-							break
 						case sdl.SCANCODE_A:
+							game.Players[0].RotVel = 0.0
 						case sdl.SCANCODE_D:
 							game.Players[0].RotVel = 0.0
-							break
 						}
 					} else {
 						//println("Got unrecognized keyboard event")
