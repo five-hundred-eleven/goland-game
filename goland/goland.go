@@ -455,11 +455,11 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 	println("In DoMaze()")
 
 	renderer := screen.Renderer
-	surfaceTexture := screen.SurfaceTexture
-	targetTexture := screen.TargetTexture
+	//surfaceTexture := screen.SurfaceTexture
+	//targetTexture := screen.TargetTexture
 	segTextures := screen.SegTextures
 	segments := screen.Segments
-	targetMask := screen.TargetMask
+	//targetMask := screen.TargetMask
 	segMask := screen.SegMask
 
 	widthF := float64(screen.Width)
@@ -531,7 +531,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 								return
 							}
 			*/
-            var err error
+            //var err error
 			numCompleted = 0
             /*
             err := renderer.SetRenderTarget(targetTexture)
