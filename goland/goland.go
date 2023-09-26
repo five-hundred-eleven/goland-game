@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/veandco/go-sdl2/sdl"
 	"math"
+	"math/rand"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/veandco/go-sdl2/sdl"
 )
 
 const (
@@ -37,6 +39,8 @@ const (
 	FLOORHEIGHT        = -5.0
 	CEILHEIGHT         = 6.5
 )
+
+var RANDOMSAMPLE = make([]byte, 4096)
 
 type Point struct {
 	X, Y float64
@@ -80,7 +84,6 @@ type Ray struct {
 }
 
 func NewGameFromFilename(filename string) (game *Game, err error) {
-
 	f, err := os.Open(filename)
 	if err != nil {
 		println("error opening maze file")
@@ -178,7 +181,13 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 			rep := int(repByte)
 			if mazePos >= mazeSize {
 				game = nil
-				err = errors.New(fmt.Sprintf("Data read exceeded expected maze size! Expected: %d Actual: >%d", mazeSize, mazePos+len(mazebufStr)-i))
+				err = errors.New(
+					fmt.Sprintf(
+						"Data read exceeded expected maze size! Expected: %d Actual: >%d",
+						mazeSize,
+						mazePos+len(mazebufStr)-i,
+					),
+				)
 				return
 			}
 			if rep == 1 {
@@ -208,7 +217,6 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 	}
 
 	return
-
 }
 
 func (game *Game) isEndpoint(p Point) bool {
@@ -224,7 +232,6 @@ func (game *Game) isEndpoint(p Point) bool {
 
 // see: https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection
 func segmentIntersection(p1, p2, p3, p4 Point) (intersection Point) {
-
 	d := (p1.X-p2.X)*(p3.Y-p4.Y) - (p1.Y-p2.Y)*(p3.X-p4.X)
 
 	if math.Abs(d) < 0.000001 {
@@ -248,7 +255,6 @@ func segmentIntersection(p1, p2, p3, p4 Point) (intersection Point) {
 	intersection.Y = ((p1.X*p2.Y-p1.Y*p2.X)*(p3.Y-p4.Y) - (p1.Y-p2.Y)*(p3.X*p4.Y-p3.Y*p4.X)) / d
 
 	return
-
 }
 
 func getDist(p1, p2 Point) float64 {
@@ -257,9 +263,9 @@ func getDist(p1, p2 Point) float64 {
 	return math.Sqrt(xx*xx + yy*yy)
 }
 
-func (p *Player) move() {
-	px := p.Velocity * math.Sin(p.Dir)
-	py := p.Velocity * math.Cos(p.Dir)
+func (p *Player) move(factor float64) {
+	px := p.Velocity * factor * math.Sin(p.Dir)
+	py := p.Velocity * factor * math.Cos(p.Dir)
 	pp := Point{
 		p.X + px*10,
 		p.Y,
@@ -278,7 +284,7 @@ func (p *Player) move() {
 	} else {
 		p.Y -= py
 	}
-	p.Dir = math.Mod(p.Dir+p.RotVel+TWOPI, TWOPI)
+	p.Dir = math.Mod(p.Dir+(p.RotVel*factor)+TWOPI, TWOPI)
 	i := int(p.Y)*p.Game.Cols + int(p.X)
 	if !(i < 0 || i >= len(p.Visited)) {
 		p.Visited[int(p.Y)*p.Game.Cols+int(p.X)] = true
@@ -416,7 +422,7 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 				xDist := dists[col]
 				yDist := abssin * xDist
 				if yDist < WALLHEIGHT {
-					x := byte(255) - byte(math.Log(xDist+yDist*2)*45)
+					x := byte(255 - math.Log(xDist+yDist*2)*45)
 					data[colStart] = x
 					data[colStart+1] = x
 					data[colStart+2] = x
@@ -436,10 +442,10 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 				}
 			} else {
 				if floorDist < 256 {
-					x := math.Log(floorDist)
-					data[colStart] = byte(17 - x*3)
-					data[colStart+1] = byte(17 - x*3)
-					data[colStart+2] = byte(85 - x*15)
+					x := byte(34 - math.Log(floorDist)*6)
+					data[colStart] = x
+					data[colStart+1] = x
+					data[colStart+2] = x
 					continue
 				}
 			}
@@ -449,14 +455,18 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 }
 
 func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
-
 	defer func() {
 		sendCh <- End
 	}()
 
 	println("In DoMaze()")
 
+	for i := range RANDOMSAMPLE {
+		RANDOMSAMPLE[i] = byte(rand.Int() % 128)
+	}
+
 	FRAMESLEEP := int64(math.Floor(1.0 / FRAMERATE * 1e9))
+	FRAMESLEEPF := float64(FRAMESLEEP)
 	renderer := screen.Renderer
 	targetTexture := screen.TargetTexture
 
@@ -555,17 +565,19 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 					break
 				}
 			}
-			//println("got past loop")
+			// println("got past loop")
 			targetTexture.Unlock()
 			renderer.Copy(targetTexture, nil, nil)
 			renderer.Present()
 		}
 		dur := time.Now().UnixNano() - startTime
-		if dur > 0 {
+		factor := 1.0
+		if FRAMESLEEP >= dur {
 			time.Sleep(time.Duration(FRAMESLEEP-dur) * time.Nanosecond)
+		} else {
+			factor = 1.0 + (float64(dur)-FRAMESLEEPF)/FRAMESLEEPF
 		}
 		numFrames++
-		game.Players[0].move()
+		game.Players[0].move(factor)
 	}
-
 }
