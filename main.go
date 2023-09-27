@@ -2,15 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/five-hundred-eleven/goland-game/goland"
 	"github.com/veandco/go-sdl2/sdl"
-	"os"
 )
 
-const ()
-
 func main() {
-
 	mazeFilePath := "maze.txt"
 	if len(os.Args) > 1 {
 		mazeFilePath = os.Args[1]
@@ -18,97 +16,82 @@ func main() {
 
 	game, err := goland.NewGameFromFilename(mazeFilePath)
 	if err != nil {
-		fmt.Sprintln("Got error constructing game: %s", err)
+		fmt.Printf("Got error constructing game: %s\n", err)
 		return
 	}
 
-	println(fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows))
+	fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows)
 
 	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
-		fmt.Sprintln("Unable to init! %s", err)
+		fmt.Printf("Unable to init! %s\n", err)
 		return
 	}
 	defer sdl.Quit()
 
 	screen := &goland.Screen{}
-	//width, height := window.GetSize()
+	// width, height := window.GetSize()
 	screen.Width = goland.WINDOWWIDTH
 	screen.Height = goland.WINDOWHEIGHT
 	// this is a constant for right triangles
 	screen.Depth = screen.Width / 2
 
-	screen.Window, err = sdl.CreateWindow("Goland!", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, goland.WINDOWWIDTH, goland.WINDOWHEIGHT, 0)
+	screen.Window, err = sdl.CreateWindow(
+		"Goland!",
+		sdl.WINDOWPOS_UNDEFINED,
+		sdl.WINDOWPOS_UNDEFINED,
+		goland.WINDOWWIDTH,
+		goland.WINDOWHEIGHT,
+		0,
+	)
 	if err != nil {
-		println(fmt.Sprintf("Unable to create goland! %s", err))
+		fmt.Printf("Unable to create goland! %s\n", err)
 		return
 	}
 	defer screen.Window.Destroy()
 
 	screen.Renderer, err = sdl.CreateRenderer(screen.Window, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
 	if err != nil {
-		println(fmt.Sprintf("Got error in CreateRenderer(): %s", err))
+		fmt.Printf("Got error in CreateRenderer(): %s\n", err)
 		return
 	}
 	defer screen.Renderer.Destroy()
 
 	surface, err := screen.Window.GetSurface()
 	if err != nil {
-		println(fmt.Sprintf("Got error in GetSurface(): %s", err))
+		fmt.Printf("Got error in GetSurface(): %s\n", err)
 		return
 	}
 	screen.Format = surface.Format
 	err = surface.SetBlendMode(sdl.BLENDMODE_ADD)
 	if err != nil {
-		println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
+		fmt.Printf("Got error in SetBlendMode(): %s\n", err)
 		return
 	}
-	screen.TargetTexture, err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
+	screen.TargetTexture, err = screen.Renderer.CreateTexture(
+		screen.Format.Format,
+		sdl.TEXTUREACCESS_STREAMING,
+		goland.WINDOWWIDTH,
+		goland.WINDOWHEIGHT,
+	)
 	if err != nil {
-		println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
+		fmt.Printf("Got error in CreateTexture(): %s\n", err)
 		return
 	}
 	defer screen.TargetTexture.Destroy()
 	screen.SurfaceTexture = screen.Renderer.GetRenderTarget()
 	if screen.SurfaceTexture != nil {
-		println(fmt.Sprintf("Got error in GetRenderTarget()"))
+		fmt.Printf("Got error in GetRenderTarget()\n")
 		return
 	}
-	/*
-	   surfaceTexture, err := screen.Renderer.CreateTextureFromSurface(surface)
-	   if err != nil {
-	       println(fmt.Sprintf("Got error in CreateTextureFromSurface(): %s", err))
-	       return
-	   }
-	   defer surfaceTexture.Destroy()
-	   err = screen.Renderer.SetRenderTarget(screen.surfaceTexture)
-	   if err != nil {
-	       println(fmt.Sprintf("Got error in SetRenderTarget(): %s", err))
-	       return
-	   }
-	*/
 
 	segWidth := goland.WINDOWWIDTH / goland.NUMWORKERS
 	screen.SegTextures = make([]*sdl.Texture, goland.NUMWORKERS)
 	screen.Segments = make([]*sdl.Rect, goland.NUMWORKERS)
 	for i := int32(0); i < goland.NUMWORKERS; i++ {
-		/*
-					screen.SegTextures[i], err = screen.Renderer.CreateTexture(screen.Format.Format, sdl.TEXTUREACCESS_STREAMING, goland.WINDOWWIDTH, goland.WINDOWHEIGHT)
-					if err != nil {
-						println(fmt.Sprintf("Got error in CreateTexture(): %s", err))
-						return
-					}
-			        println(fmt.Sprintf("Got segment texture: %d x %d", segWidth, goland.WINDOWHEIGHT))
-					defer screen.SegTextures[i].Destroy()
-					err = screen.SegTextures[i].SetBlendMode(sdl.BLENDMODE_NONE)
-					if err != nil {
-						println(fmt.Sprintf("Got error in SetBlendMode(): %s", err))
-						return
-					}
-		*/
-		screen.Segments[i] = &sdl.Rect{segWidth * i, 0, segWidth, goland.WINDOWHEIGHT}
+		screen.Segments[i] = &sdl.Rect{X: segWidth * i, Y: 0, W: segWidth, H: goland.WINDOWHEIGHT}
 	}
-	screen.TargetMask = &sdl.Rect{0, 0, goland.WINDOWWIDTH, goland.WINDOWHEIGHT}
-	screen.SegMask = &sdl.Rect{0, 0, segWidth, goland.WINDOWHEIGHT}
+	screen.TargetMask = &sdl.Rect{X: 0, Y: 0, W: goland.WINDOWWIDTH, H: goland.WINDOWHEIGHT}
+	screen.SegMask = &sdl.Rect{X: 0, Y: 0, W: segWidth, H: goland.WINDOWHEIGHT}
 
 	sendCh := make(chan int)
 	recvCh := make(chan int)
@@ -122,7 +105,7 @@ func main() {
 			for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 				switch e := event.(type) {
 				case *sdl.QuitEvent:
-					println("Got quit event!")
+					fmt.Printf("Got quit event!\n")
 					return
 				case *sdl.KeyboardEvent:
 					if e.Type == sdl.KEYDOWN {
@@ -148,10 +131,10 @@ func main() {
 							game.Players[0].RotVel = 0.0
 						}
 					} else {
-						//println("Got unrecognized keyboard event")
+						// println("Got unrecognized keyboard event")
 					}
 				default:
-					//println(fmt.Sprintf("Got unrecognized event! %d", event.GetType()))
+					// println(fmt.Sprintf("Got unrecognized event! %d", event.GetType()))
 				}
 			}
 		}
@@ -160,11 +143,10 @@ func main() {
 	for {
 		msg := <-recvCh
 		if msg == goland.End {
-			println("Goland got destroyed!")
+			fmt.Printf("Goland got destroyed!\n")
 			break
 		} else {
-			println("Got unrecognized message??")
+			fmt.Printf("Got unrecognized message??\n")
 		}
 	}
-
 }

@@ -86,7 +86,7 @@ type Ray struct {
 func NewGameFromFilename(filename string) (game *Game, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		println("error opening maze file")
+		fmt.Printf("error opening maze file\n")
 		return
 	}
 	numBytesRead := 0
@@ -109,38 +109,38 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 
 	startY, err := strconv.ParseFloat(startYStr, 32)
 	if err != nil {
-		println(fmt.Sprintf("error parsing starting Y coordinate: %s", err))
+		fmt.Printf("error parsing starting Y coordinate: %s\n", err)
 		return
 	}
 
 	startX, err := strconv.ParseFloat(startXStr, 32)
 	if err != nil {
-		println(fmt.Sprintf("error parsing starting X coordinate: %s", err))
+		fmt.Printf("error parsing starting X coordinate: %s\n", err)
 		return
 	}
 
 	startDirection, err := strconv.ParseFloat(startDirectionStr, 32)
 	if err != nil {
-		println(fmt.Sprintf("error parsing starting direction: %s", err))
+		fmt.Printf("error parsing starting direction: %s\n", err)
 		return
 	}
 	// convert to radians
 	startDirection = startDirection * math.Pi / 180.0
 
-	println(fmt.Sprintf("Got starting coordinates: (%f, %f) facing %f", startX, startY, startDirection))
+	fmt.Printf("Got starting coordinates: (%f, %f) facing %f\n", startX, startY, startDirection)
 
 	numRows, err := strconv.Atoi(numRowsStr)
 	if err != nil {
-		println(fmt.Sprintf("error parsing number of rows: %s", err))
+		fmt.Printf("error parsing number of rows: %s\n", err)
 		return
 	}
 
 	numCols, err := strconv.Atoi(numColsStr)
 	if err != nil {
-		println(fmt.Sprintf("error parsing number of cols: %s", err))
+		fmt.Printf("error parsing number of cols: %s\n", err)
 		return
 	}
-	println(fmt.Sprintf("expecting arr: %d x %d", numCols, numRows))
+	fmt.Printf("expecting arr: %d x %d\n", numCols, numRows)
 	game = &Game{}
 	game.Rows = numRows * 2
 	game.Cols = numCols * 2
@@ -209,8 +209,8 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 		}
 	}
 	if mazePos != mazeSize {
-		println(fmt.Sprintf("Expected maze size: %d", mazeSize))
-		println(fmt.Sprintf("Actual maze size: %d", mazePos))
+		fmt.Printf("Expected maze size: %d\n", mazeSize)
+		fmt.Printf("Actual maze size: %d\n", mazePos)
 		game = nil
 		err = errors.New("Cannot continue with size discrepancy.")
 		return
@@ -459,7 +459,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		sendCh <- End
 	}()
 
-	println("In DoMaze()")
+	fmt.Printf("In DoMaze()\n")
 
 	for i := range RANDOMSAMPLE {
 		RANDOMSAMPLE[i] = byte(rand.Int() % 128)
@@ -517,7 +517,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 	for {
 		startTime := time.Now().UnixNano()
 		if startTime-intervalStartSec >= intervalDurSec {
-			println(fmt.Sprintf("FPS: %d", numFrames))
+			fmt.Printf("FPS: %d\n", numFrames)
 			intervalStartSec = startTime
 			numFrames = 0
 		}
@@ -526,22 +526,22 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			if msg == End {
 				return
 			}
-			println("you goofed")
+			fmt.Printf("you goofed\n")
 		default:
 			var err error
 			err = renderer.SetDrawColor(0, 0, 0, 255)
 			if err != nil {
-				println(fmt.Sprintf("Got error on SetDrawColor(): %s", err))
+				fmt.Printf("Got error on SetDrawColor(): %s\n", err)
 				return
 			}
 			err = renderer.Clear()
 			if err != nil {
-				println(fmt.Sprintf("Got error on Clear(): %s", err))
+				fmt.Printf("Got error on Clear(): %s\n", err)
 				return
 			}
 			numCompleted = 0
 			if len(completedCh) != 0 {
-				println("completedCh should be empty")
+				fmt.Printf("completedCh should be empty\n")
 				return
 			}
 			for i := int32(0); i < NUMWORKERS; i++ {
@@ -549,7 +549,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			}
 			pixels, _, err := targetTexture.Lock(nil)
 			if err != nil {
-				println(fmt.Sprintf("Got err from Lock(): %s", err))
+				fmt.Printf("Got err from Lock(): %s\n", err)
 				return
 			}
 			for {
@@ -575,7 +575,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		if FRAMESLEEP >= dur {
 			time.Sleep(time.Duration(FRAMESLEEP-dur) * time.Nanosecond)
 		} else {
-			factor = 1.0 + (float64(dur)-FRAMESLEEPF)/FRAMESLEEPF
+			factor += (float64(dur) - FRAMESLEEPF) / FRAMESLEEPF
 		}
 		numFrames++
 		game.Players[0].move(factor)
