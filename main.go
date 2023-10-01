@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	mazeFilePath := "maze.txt"
+	mazeFilePath := "maze.json"
 	if len(os.Args) > 1 {
 		mazeFilePath = os.Args[1]
 	}
@@ -20,7 +20,11 @@ func main() {
 		return
 	}
 
-	fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows)
+	fmt.Printf("Got game\n")
+	fmt.Printf("Got player %f %f %f\n", game.Players[0].X, game.Players[0].Y, game.Players[0].Theta)
+	//fmt.Printf("Got surfaces: len: %d\n", len(game.Surfaces))
+	//fmt.Printf("First surface: %f %f %f %f\n", game.Surfaces[0].P1.X, game.Surfaces[0].P1.Y, game.Surfaces[0].P2.X, game.Surfaces[0].P2.Y)
+	//fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows)
 
 	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
 		fmt.Printf("Unable to init! %s\n", err)
