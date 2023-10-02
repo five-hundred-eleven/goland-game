@@ -16,7 +16,7 @@ const (
 
 const (
 	FRAMERATE          = 61
-	NUMWORKERS         = 4 // TODO
+	NUMWORKERS         = 8 // TODO
 	MILLI              = 1e-3
 	MICRO              = 1e-6
 	SHEARFACTOR        = 1.00
@@ -37,9 +37,11 @@ type Game struct {
 }
 
 type GameData struct {
-	Players  []*Player `json:"players"`
-	Surfaces []Surface `json:"surfaces"`
+	Players  []*Player     `json:"players"`
+	Surfaces []SurfaceData `json:"surfaces"`
 }
+
+type SurfaceData []Point
 
 type Screen struct {
 	Width, Height, Depth int32
@@ -50,13 +52,19 @@ type Screen struct {
 	TargetTexture        *sdl.Texture
 	SegTextures          []*sdl.Texture
 	Segments             []*sdl.Rect
+	XOffsets             []int32
 	TargetMask           *sdl.Rect
 	SegMask              *sdl.Rect
 	Format               *sdl.PixelFormat
 }
 
 type Player struct {
-	Vector
+	X                float64 `json:"x"`
+	Y                float64 `json:"y"`
+	Z                float64 `json:"z"`
+	Height           float64 `json:"height"`
+	HTheta           float64 `json:"htheta"`
+	VTheta           float64 `json:"vtheta"`
 	Velocity, RotVel float64
 	Game             *Game
 	Visited          map[int]bool
@@ -84,43 +92,40 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 
 	fmt.Printf("Got game with num players: %d\n", len(gameData.Players))
 	fmt.Printf(
-		"Got player: %f %f %f\n",
+		"Got player: %f %f %f %f\n",
 		gameData.Players[0].X,
 		gameData.Players[0].Y,
-		gameData.Players[0].Theta,
-	)
-	fmt.Printf("Got num surfaces: %d\n", len(gameData.Surfaces))
-	fmt.Printf(
-		"Got surface: %f %f %f %f\n",
-		gameData.Surfaces[0].P1.X,
-		gameData.Surfaces[0].P1.Y,
-		gameData.Surfaces[0].P2.X,
-		gameData.Surfaces[0].P2.Y,
+		gameData.Players[0].HTheta,
+		gameData.Players[0].VTheta,
 	)
 
 	game = &Game{}
 	game.Players = gameData.Players
 	for _, player := range game.Players {
-		player.Theta = player.Theta * math.Pi / 180.0
+		player.Z += player.Height
+		player.HTheta = player.HTheta * math.Pi / 180.0
+		player.VTheta = player.VTheta * math.Pi / 180.0
 		player.Game = game
 		player.Visited = make(map[int]bool)
 	}
-	game.Tree, err = NewOctreeFromSurfaces(gameData.Surfaces)
-
-	return
-
-}
-
-func Advance(vec Vector, dist float64) (res Vector) {
-	res = Vector{
-		Point{
-			vec.X + math.Sin(vec.Theta)*dist,
-			vec.Y + math.Cos(vec.Theta)*dist,
-			0.0, // TODO
-		},
-		vec.Theta,
+	surfaces := make([]Surface, len(gameData.Surfaces))
+	for i, surface := range gameData.Surfaces {
+		surfaces[i], err = SurfaceFromSurfaceData(surface)
+		if err != nil {
+			fmt.Printf("Got err constructing surface: %s\n", err)
+			return
+		}
+		surfaces[i].SetColor(Color{R: 255, G: 255, B: 255})
 	}
+	fmt.Printf("Got num surfaces: %d\n", len(surfaces))
+	game.Tree, err = NewOctreeFromSurfaces(surfaces)
+	if err != nil {
+		game = nil
+		return
+	}
+
 	return
+
 }
 
 func visitedIndex(X, Y float64) int {
@@ -141,105 +146,128 @@ func (p *Player) GetVisited(X, Y float64) (res bool) {
 
 func (p *Player) Move(factor float64) {
 	tree := p.Game.Tree
-	xp := p.Velocity * factor * math.Sin(p.Theta)
-	pp := Point{
-		X: p.X + xp*10,
-		Y: p.Y,
+	xp := p.Velocity * factor * math.Sin(p.HTheta)
+	vec := Vector{
+		Start: Point{
+			X: p.X,
+			Y: p.Y,
+			Z: p.Z,
+		},
+		End: Point{
+			X: p.X + xp,
+			Y: p.Y,
+			Z: p.Z,
+		},
 	}
-	intersection, _ := tree.TraceSegment(p.Point, pp)
-	if math.IsNaN(intersection.X) {
+	_, _, isResult := tree.TraceVector(vec, nil)
+	if !isResult {
 		p.X += xp
 	} else {
 		p.X -= xp
 	}
-	yp := p.Velocity * factor * math.Cos(p.Theta)
-	pp = Point{
-		X: p.X,
-		Y: p.Y + yp*10,
+	yp := p.Velocity * factor * math.Cos(p.HTheta)
+	vec = Vector{
+		Start: Point{
+			X: p.X,
+			Y: p.Y,
+			Z: p.Z,
+		},
+		End: Point{
+			X: p.X,
+			Y: p.Y + yp,
+			Z: p.Z,
+		},
 	}
-	intersection, _ = tree.TraceSegment(p.Point, pp)
-	if math.IsNaN(intersection.X) {
+	_, _, isResult = tree.TraceVector(vec, nil)
+	if !isResult {
 		p.Y += yp
 	} else {
 		p.Y -= yp
 	}
-	p.Theta = AddAndNormalize(p.Theta, p.RotVel)
+	p.HTheta = AddAndNormalize(p.HTheta, p.RotVel)
 	p.SetVisited(p.X, p.Y)
 }
 
-func (p *Player) rotate(rot float64) Vector {
-	return Vector{Point{p.X, p.Y, 0.0}, AddAndNormalize(p.Theta, rot)}
+func (p *Player) VectorFromThetas(HTheta, VTheta float64) (res Vector) {
+
+	res.Start.X = p.X
+	res.Start.Y = p.Y
+	res.Start.Z = p.Z
+
+	HTheta = AddAndNormalize(p.HTheta, HTheta)
+	VTheta = AddAndNormalize(p.VTheta, VTheta)
+
+	res.End.X = res.Start.X + math.Sin(HTheta)*4096.0
+	res.End.Y = res.Start.Y + math.Cos(HTheta)*4096.0
+	res.End.Z = res.Start.Z + math.Cos(VTheta)*4096.0
+
+	return
+
 }
 
-func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player) {
+func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player, cache *SurfaceCache) {
 	defer func() {
 		completedCh <- segmentIx
 	}()
 	tree := game.Tree
 	segment := screen.Segments[segmentIx]
 	width := segment.W
-	indexStart := segment.X
-	indexStop := indexStart + width
-	isfilled := make([]bool, width)
-	dists := make([]float64, width)
-	rotated := make([]Vector, width)
-	for i := indexStart; i < indexStop; i++ {
-		col := i - indexStart
-		rotated[col] = player.rotate(screen.HAngles[i])
-		endpoint, dist := tree.TraceVector(rotated[col], 4096.0)
-		if math.IsNaN(endpoint.X) {
-			continue
-		}
-		isfilled[col] = true
-		dists[col] = dist
-	}
-	for row := int32(0); row < screen.Height; row++ {
-		rowStart := (row*screen.Width + indexStart) * 4
+	height := segment.H
+	XStart := segment.X
+	YStart := segment.Y
+	XStop := XStart + width
+	YStop := YStart + height
+	XOffset := screen.XOffsets[segmentIx]
+	HAngles := screen.HAngles
+	VAngles := screen.VAngles
+	for y := YStart; y < YStop; y++ {
+		rowStart := y * screen.Width * 4
 		data := make([]byte, width*4)
-		isUpper := math.Signbit(screen.VAngles[row])
-		abssin := math.Abs(math.Sin(screen.VAngles[row]))
-		floorDist := math.NaN()
-		ceilDist := math.NaN()
-		if !isUpper {
-			floorDist = math.Abs(FLOORHEIGHT / math.Tan(screen.VAngles[row]))
-		} else {
-			ceilDist = math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[row]))
-		}
-		for col := int32(0); col < width; col++ {
-			colStart := col * 4
-			if isfilled[col] {
-				// TODO don't do this repeatedly
-				// should probably refactor this whole function...
-				xDist := dists[col]
-				yDist := abssin * xDist
-				if yDist < WALLHEIGHT {
-					x := byte(255 - math.Min(math.Log(xDist+yDist*2)*45, 245.0))
-					data[colStart] = x
-					data[colStart+1] = x
-					data[colStart+2] = x
-					continue
+		/*
+			isUpper := math.Signbit(screen.VAngles[y])
+				abssin := math.Abs(math.Sin(screen.VAngles[y]))
+				floorDist := math.NaN()
+				ceilDist := math.NaN()
+				if !isUpper {
+					floorDist = math.Abs(FLOORHEIGHT / math.Tan(screen.VAngles[y]))
+				} else {
+					ceilDist = math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[y]))
 				}
-			}
-			if isUpper {
-				if ceilDist < 256 {
-					rayvec := rotated[col]
-					ceilpoint1 := Advance(rayvec, ceilDist)
-					if player.GetVisited(ceilpoint1.X, ceilpoint1.Y) {
-						data[colStart] = 0
-						data[colStart+1] = 0
-						data[colStart+2] = 255
+		*/
+		for xi := XStart; xi < XStop; xi++ {
+			x := (xi + XOffset) % screen.Width
+			pixelStart := x * 4
+			vec := player.VectorFromThetas(HAngles[x], VAngles[y])
+			var color Color
+			color = tree.TraceVectorToColor(vec, cache)
+			data[pixelStart] = color.B
+			data[pixelStart+1] = color.G
+			data[pixelStart+2] = color.R
+			/*
+				if isUpper {
+					if ceilDist < 256 {
+						rayvec := rotated[col]
+						ceilpoint1 := Advance(rayvec, ceilDist)
+						if player.GetVisited(ceilpoint1.X, ceilpoint1.Y) {
+							data[colStart] = 0
+							data[colStart+1] = 0
+							data[colStart+2] = 255
+							continue
+						}
+					}
+				} else {
+					if floorDist < 256 {
+						logdist := math.Log(floorDist)
+						r := byte(34 - logdist*7)
+						g := byte(34 - logdist*6)
+						b := byte(34 - logdist*5)
+						data[colStart] = b
+						data[colStart+1] = g
+						data[colStart+2] = r
 						continue
 					}
 				}
-			} else {
-				if floorDist < 256 {
-					x := byte(34 - math.Log(floorDist)*6)
-					data[colStart] = x
-					data[colStart+1] = x
-					data[colStart+2] = x
-					continue
-				}
-			}
+			*/
 		}
 		rayCh <- Ray{rowStart, data}
 	}
@@ -305,6 +333,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 		startTime := time.Now().UnixNano()
 		if startTime-intervalStartSec >= intervalDurSec {
 			fmt.Printf("FPS: %d\n", numFrames)
+			fmt.Printf("Player: (%f, %f) facing (%f, %f)\n", player.X, player.Y, player.HTheta, player.VTheta)
 			intervalStartSec = startTime
 			numFrames = 0
 		}
@@ -316,6 +345,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			fmt.Printf("you goofed\n")
 		default:
 			var err error
+			cache := NewSurfaceCache()
 			err = renderer.SetDrawColor(0, 0, 0, 255)
 			if err != nil {
 				fmt.Printf("Got error on SetDrawColor(): %s\n", err)
@@ -332,7 +362,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 				return
 			}
 			for i := int32(0); i < NUMWORKERS; i++ {
-				go doRaytrace(completedCh, rayCh, screen, i, game, player)
+				go doRaytrace(completedCh, rayCh, screen, i, game, player, cache)
 			}
 			pixels, _, err := targetTexture.Lock(nil)
 			if err != nil {

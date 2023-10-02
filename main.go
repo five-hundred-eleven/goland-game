@@ -21,10 +21,6 @@ func main() {
 	}
 
 	fmt.Printf("Got game\n")
-	fmt.Printf("Got player %f %f %f\n", game.Players[0].X, game.Players[0].Y, game.Players[0].Theta)
-	//fmt.Printf("Got surfaces: len: %d\n", len(game.Surfaces))
-	//fmt.Printf("First surface: %f %f %f %f\n", game.Surfaces[0].P1.X, game.Surfaces[0].P1.Y, game.Surfaces[0].P2.X, game.Surfaces[0].P2.Y)
-	//fmt.Sprintf("Got game: %d x %d", game.Cols, game.Rows)
 
 	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
 		fmt.Printf("Unable to init! %s\n", err)
@@ -88,11 +84,15 @@ func main() {
 		return
 	}
 
-	segWidth := goland.WINDOWWIDTH / goland.NUMWORKERS
+	segWidth := goland.WINDOWWIDTH
+	segHeight := goland.WINDOWHEIGHT / goland.NUMWORKERS
 	screen.SegTextures = make([]*sdl.Texture, goland.NUMWORKERS)
 	screen.Segments = make([]*sdl.Rect, goland.NUMWORKERS)
+	screen.XOffsets = make([]int32, goland.NUMWORKERS)
+	XSingleOffset := screen.Width / goland.NUMWORKERS
 	for i := int32(0); i < goland.NUMWORKERS; i++ {
-		screen.Segments[i] = &sdl.Rect{X: segWidth * i, Y: 0, W: segWidth, H: goland.WINDOWHEIGHT}
+		screen.Segments[i] = &sdl.Rect{X: 0, Y: i * segHeight, W: segWidth, H: segHeight}
+		screen.XOffsets[i] = i * XSingleOffset
 	}
 	screen.TargetMask = &sdl.Rect{X: 0, Y: 0, W: goland.WINDOWWIDTH, H: goland.WINDOWHEIGHT}
 	screen.SegMask = &sdl.Rect{X: 0, Y: 0, W: segWidth, H: goland.WINDOWHEIGHT}
