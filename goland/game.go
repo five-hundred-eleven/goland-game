@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/veandco/go-sdl2/sdl"
@@ -159,7 +160,7 @@ func (p *Player) Move(factor float64) {
 			Z: p.Z,
 		},
 	}
-	_, _, isResult := tree.TraceVector(vec, nil)
+	_, _, isResult := tree.TraceVector(vec, nil, nil)
 	if !isResult {
 		p.X += xp
 	} else {
@@ -178,7 +179,7 @@ func (p *Player) Move(factor float64) {
 			Z: p.Z,
 		},
 	}
-	_, _, isResult = tree.TraceVector(vec, nil)
+	_, _, isResult = tree.TraceVector(vec, nil, nil)
 	if !isResult {
 		p.Y += yp
 	} else {
@@ -205,7 +206,7 @@ func (p *Player) VectorFromThetas(HTheta, VTheta float64) (res Vector) {
 
 }
 
-func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player, cache *SurfaceCache) {
+func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player, cache map[float64]int, cacheLock *sync.Mutex) {
 	defer func() {
 		completedCh <- segmentIx
 	}()
@@ -220,6 +221,19 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 	XOffset := screen.XOffsets[segmentIx]
 	HAngles := screen.HAngles
 	VAngles := screen.VAngles
+
+	vec := Vector{}
+	vec.Start.X = player.X
+	vec.Start.Y = player.Y
+	vec.Start.Z = player.Z
+
+	xs := make([]float64, width)
+	ys := make([]float64, width)
+	for x := XStart; x < XStop; x++ {
+		HTheta := AddAndNormalize(player.HTheta, HAngles[x])
+		xs[x] = vec.Start.X + math.Sin(HTheta)*4096.0
+		ys[x] = vec.Start.Y + math.Cos(HTheta)*4096.0
+	}
 	for y := YStart; y < YStop; y++ {
 		rowStart := y * screen.Width * 4
 		data := make([]byte, width*4)
@@ -234,12 +248,14 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 					ceilDist = math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[y]))
 				}
 		*/
+		VTheta := AddAndNormalize(player.VTheta, VAngles[y])
+		vec.End.Z = player.Z + math.Cos(VTheta)*4096.0
 		for xi := XStart; xi < XStop; xi++ {
-			x := (xi + XOffset) % screen.Width
+			x := (xi + XOffset) % width
 			pixelStart := x * 4
-			vec := player.VectorFromThetas(HAngles[x], VAngles[y])
-			var color Color
-			color = tree.TraceVectorToColor(vec, cache)
+			vec.End.X = xs[x]
+			vec.End.Y = ys[x]
+			color := tree.TraceVectorToColor(vec, cache, cacheLock)
 			data[pixelStart] = color.B
 			data[pixelStart+1] = color.G
 			data[pixelStart+2] = color.R
@@ -345,7 +361,8 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 			fmt.Printf("you goofed\n")
 		default:
 			var err error
-			cache := NewSurfaceCache()
+			cache := make(map[float64]int)
+			cacheLock := &sync.Mutex{}
 			err = renderer.SetDrawColor(0, 0, 0, 255)
 			if err != nil {
 				fmt.Printf("Got error on SetDrawColor(): %s\n", err)
@@ -362,7 +379,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 				return
 			}
 			for i := int32(0); i < NUMWORKERS; i++ {
-				go doRaytrace(completedCh, rayCh, screen, i, game, player, cache)
+				go doRaytrace(completedCh, rayCh, screen, i, game, player, cache, cacheLock)
 			}
 			pixels, _, err := targetTexture.Lock(nil)
 			if err != nil {
