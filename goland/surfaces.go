@@ -40,39 +40,38 @@ type SegmentSurface struct {
 }
 
 type QuadSurface struct {
-	V1, V2 Vector
-	Color  Color
+	P1, P2, P3 Point
+	Color      Color
 }
 
-func SurfaceFromSurfaceData(sd SurfaceData) (res Surface, err error) {
+func SurfaceFromSurfaceData(sd SurfaceData) (res QuadSurface, err error) {
 	if len(sd) == 4 {
-		/*
-			qs := &QuadSurface{}
-			qs.V1 = Vector{Start: sd[0], End: sd[1]}
-			qs.V2 = Vector{Start: sd[0], End: sd[3]}
-			res = qs
-			return
-		*/
-		s := &SegmentSurface{
-			Vector: Vector{
-				Start: sd[0],
-				End:   sd[1],
-			},
-			Color: Color{
-				R: 255,
-				G: 255,
-				B: 255,
-			},
-		}
-		res = s
+		res = QuadSurface{}
+		res.P1 = sd[0]
+		res.P2 = sd[1]
+		res.P3 = sd[3]
 		return
+		/*
+			s := &SegmentSurface{
+				Vector: Vector{
+					Start: sd[0],
+					End:   sd[1],
+				},
+				Color: Color{
+					R: 255,
+					G: 255,
+					B: 255,
+				},
+			}
+			res = s
+		*/
 	}
 	err = errors.New(fmt.Sprintf("Got surface data with invalid number of poins: %d", len(sd)))
 	return
 }
 
 // see: https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection
-func (s *SegmentSurface) GetIntersection(vec Vector) (intersection Point) {
+func (s SegmentSurface) GetIntersection(vec Vector) (intersection Point) {
 
 	d := (s.Start.X-s.End.X)*(vec.Start.Y-vec.End.Y) - (s.Start.Y-s.End.Y)*(vec.Start.X-vec.End.X)
 
@@ -138,22 +137,22 @@ func (s *SegmentSurface) SetColor(color Color) {
 	s.Color = color
 }
 
-func (qs *QuadSurface) GetIntersection(vec Vector) (res Point) {
+func (qs QuadSurface) GetIntersection(vec Vector) (res Point) {
 
 	res.X = math.NaN()
 	res.Y = math.NaN()
 	res.Z = math.NaN()
 
 	lba := VectorSub(vec.Start, vec.End)
-	v01 := VectorSub(qs.V1.End, qs.V1.Start)
-	v02 := VectorSub(qs.V2.End, qs.V2.Start)
+	v01 := VectorSub(qs.P2, qs.P1)
+	v02 := VectorSub(qs.P3, qs.P1)
 	cross12 := VectorCross(v01, v02)
 	det := VectorDot(lba, cross12)
 	if math.Abs(det) < MICRO {
 		return
 	}
 
-	diffStart := VectorSub(vec.Start, qs.V1.Start)
+	diffStart := VectorSub(vec.Start, qs.P1)
 	tn := VectorDot(cross12, diffStart)
 	if math.Signbit(tn) != math.Signbit(det) || math.Abs(det) < math.Abs(tn) {
 		return
@@ -184,15 +183,21 @@ func (qs *QuadSurface) GetIntersection(vec Vector) (res Point) {
 
 func (qs *QuadSurface) GetPoints() (res []Point) {
 	res = make([]Point, 4)
-	res[0] = qs.V1.Start
-	res[1] = qs.V1.End
-	res[2] = VectorAdd(qs.V1.End, VectorSub(qs.V2.End, qs.V2.Start))
-	res[3] = qs.V2.End
+	res[0] = qs.P1
+	res[1] = qs.P2
+	res[2] = VectorAdd(qs.P2, VectorSub(qs.P3, qs.P1))
+	res[3] = qs.P3
 	return
 }
 
 func (qs *QuadSurface) GetColor(relativePoint Point) (res Color) {
+	dist := relativePoint.X*relativePoint.X + relativePoint.Y*relativePoint.Y + relativePoint.Z*relativePoint.Z
+	dist = math.Sqrt(dist)
+	dist = math.Min(math.Log(dist)*45, 215.0)
 	res = qs.Color
+	res.R -= byte(dist - 0.5)
+	res.G -= byte(dist)
+	res.B -= byte(dist + 0.5)
 	return
 }
 

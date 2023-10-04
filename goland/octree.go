@@ -7,14 +7,17 @@ import (
 )
 
 type Octree struct {
-	Id                int
-	SurfaceIndices    []int
-	Surfaces          []Surface
-	Children          []Octree
-	Parent            *Octree
-	XMin, XMax, XAxis float64
-	YMin, YMax, YAxis float64
-	ZMin, ZMax, ZAxis float64
+	Id                   int
+	SurfaceIndices       []int
+	Surfaces             []QuadSurface
+	Children             []Octree
+	Parent               *Octree
+	XMinF, XMaxF, XAxisF float64
+	YMinF, YMaxF, YAxisF float64
+	ZMinF, ZMaxF, ZAxisF float64
+	XMin, XMax, XAxis    int
+	YMin, YMax, YAxis    int
+	ZMin, ZMax, ZAxis    int
 }
 
 type SurfaceCache struct {
@@ -62,14 +65,14 @@ func (cache *SurfaceCache) Contains(ix int) bool {
 	return isOk
 }
 
-func (tree *Octree) getSurfacesInTree(surfaces []Surface, parentSurfaceIndices []int) (res []int) {
+func (tree *Octree) getSurfacesInTree(surfaces []QuadSurface, parentSurfaceIndices []int) (res []int) {
 	res = make([]int, 0)
 	for _, ix := range parentSurfaceIndices {
 		surface := surfaces[ix]
 		points := surface.GetPoints()
 		doContinue := false
 		for _, point := range points {
-			if tree.XMin <= point.X && point.X <= tree.XMax && tree.YMin <= point.Y && point.Y <= tree.YMax { //&& tree.ZMin <= point.Z && point.Z <= tree.ZMax {
+			if tree.XMinF <= point.X && point.X <= tree.XMaxF && tree.YMinF <= point.Y && point.Y <= tree.YMaxF && tree.ZMinF <= point.Z && point.Z <= tree.ZMaxF {
 				/*
 					if tree.Id != 0 {
 						fmt.Printf("Storing surface in tree by point: %d: (%f, %f, %f)\n", tree.Id, point.X, point.Y, point.Z)
@@ -106,7 +109,7 @@ func (tree *Octree) getSurfacesInTree(surfaces []Surface, parentSurfaceIndices [
 	return
 }
 
-func constructOctree(tree *Octree, surfaces []Surface, parentSurfaceIndices []int) (err error) {
+func constructOctree(tree *Octree, surfaces []QuadSurface, parentSurfaceIndices []int) (err error) {
 
 	tree.Id = TREEID
 	TREEID++
@@ -115,10 +118,20 @@ func constructOctree(tree *Octree, surfaces []Surface, parentSurfaceIndices []in
 	tree.YAxis = (tree.YMin + tree.YMax) / 2
 	tree.ZAxis = (tree.ZMin + tree.ZMax) / 2
 
+	tree.XMinF = float64(tree.XMin)
+	tree.XMaxF = float64(tree.XMax)
+	tree.XAxisF = float64(tree.XAxis)
+	tree.YMinF = float64(tree.YMin)
+	tree.YMaxF = float64(tree.YMax)
+	tree.YAxisF = float64(tree.YAxis)
+	tree.ZMinF = float64(tree.ZMin)
+	tree.ZMaxF = float64(tree.ZMax)
+	tree.ZAxisF = float64(tree.ZAxis)
+
 	tree.SurfaceIndices = tree.getSurfacesInTree(surfaces, parentSurfaceIndices)
 
 	// no need to recurse if small number of surfaces
-	if len(tree.SurfaceIndices) <= 1 {
+	if len(tree.SurfaceIndices) <= MINSURFACES {
 		return
 	}
 
@@ -179,13 +192,14 @@ func constructOctree(tree *Octree, surfaces []Surface, parentSurfaceIndices []in
 
 }
 
-func NewOctreeFromSurfaces(surfaces []Surface) (root *Octree, err error) {
+func NewOctreeFromSurfaces(surfaces []QuadSurface) (root *Octree, err error) {
 
 	root = &Octree{}
 	root.SurfaceIndices = make([]int, len(surfaces))
 	for i := 0; i < len(surfaces); i++ {
 		root.SurfaceIndices[i] = i
 	}
+	// TODO figure out min/max dynamically??
 	root.Surfaces = surfaces
 	root.XMin = -1024
 	root.XMax = 1024
@@ -204,30 +218,36 @@ func NewOctreeFromSurfaces(surfaces []Surface) (root *Octree, err error) {
 
 }
 
-func (root *Octree) getTreeByPoint(point Point) (res *Octree) {
+func (root *Octree) GetTreeByPointF(point Point) (res *Octree) {
 
 	current := root
+	X := point.X
+	Y := point.Y
+	Z := point.Z
 
 	for {
 
-		if point.X >= current.XMax || point.X < current.XMin {
-			return
-		}
+		// TODO remove me
+		/*
+			if X >= current.XMaxF || X < current.XMinF {
+				return
+			}
 
-		if point.Y >= current.YMax || point.Y < current.YMin {
-			return
-		}
+			if Y >= current.YMaxF || Y < current.YMinF {
+				return
+			}
 
-		if point.Z >= current.ZMax || point.Z < current.ZMin {
-			return
-		}
+			if Z >= current.ZMaxF || Z < current.ZMinF {
+				return
+			}
+		*/
 
 		if current.Children == nil {
 			break
 		}
-		if point.X >= current.XAxis {
-			if point.Y < current.YAxis {
-				if point.Z >= current.ZAxis {
+		if X >= current.XAxisF {
+			if Y < current.YAxisF {
+				if Z >= current.ZAxisF {
 					current = &current.Children[0]
 					continue
 				} else {
@@ -235,7 +255,7 @@ func (root *Octree) getTreeByPoint(point Point) (res *Octree) {
 					continue
 				}
 			} else {
-				if point.Z >= current.ZAxis {
+				if Z >= current.ZAxisF {
 					current = &current.Children[1]
 					continue
 				} else {
@@ -244,8 +264,8 @@ func (root *Octree) getTreeByPoint(point Point) (res *Octree) {
 				}
 			}
 		} else {
-			if point.Y >= current.YAxis {
-				if point.Z >= current.ZAxis {
+			if Y >= current.YAxisF {
+				if Z >= current.ZAxisF {
 					current = &current.Children[2]
 					continue
 				} else {
@@ -253,7 +273,78 @@ func (root *Octree) getTreeByPoint(point Point) (res *Octree) {
 					continue
 				}
 			} else {
-				if point.Z >= current.ZAxis {
+				if Z >= current.ZAxisF {
+					current = &current.Children[3]
+					continue
+				} else {
+					current = &current.Children[7]
+					continue
+				}
+			}
+		}
+	}
+
+	res = current
+	return
+
+}
+
+func (root *Octree) GetTreeByPoint(point Point) (res *Octree) {
+
+	current := root
+	X := int(math.Floor(point.X))
+	Y := int(math.Floor(point.Y))
+	Z := int(math.Floor(point.Z))
+
+	for {
+
+		// TODO remove me
+		/*
+			if X >= current.XMaxF || X < current.XMinF {
+				return
+			}
+
+			if Y >= current.YMaxF || Y < current.YMinF {
+				return
+			}
+
+			if Z >= current.ZMaxF || Z < current.ZMinF {
+				return
+			}
+		*/
+
+		if current.Children == nil {
+			break
+		}
+		if X >= current.XAxis {
+			if Y < current.YAxis {
+				if Z >= current.ZAxis {
+					current = &current.Children[0]
+					continue
+				} else {
+					current = &current.Children[4]
+					continue
+				}
+			} else {
+				if Z >= current.ZAxis {
+					current = &current.Children[1]
+					continue
+				} else {
+					current = &current.Children[5]
+					continue
+				}
+			}
+		} else {
+			if Y >= current.YAxis {
+				if Z >= current.ZAxis {
+					current = &current.Children[2]
+					continue
+				} else {
+					current = &current.Children[6]
+					continue
+				}
+			} else {
+				if Z >= current.ZAxis {
 					current = &current.Children[3]
 					continue
 				} else {
@@ -287,11 +378,12 @@ func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sy
 	surfaces := tree.Surfaces
 	closestDist2 := math.Pow(2048, 2)
 	travelingVec := vec
-	var closestRelativePoint, closestIntersection Point
-	closestRelativePoint.X = math.NaN()
-	closestRelativePoint.Y = math.NaN()
-	closestRelativePoint.Z = math.NaN()
+	var closestIntersection Point
+	relativePoint.X = math.NaN()
+	relativePoint.Y = math.NaN()
+	relativePoint.Z = math.NaN()
 	startIx := 0
+	visited := make(map[int]bool)
 	if vec.Start.X <= vec.End.X {
 		if vec.Start.Y > vec.End.Y {
 			startIx = 1
@@ -305,20 +397,40 @@ func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sy
 			startIx = 4
 		}
 	}
-	if cache != nil {
-		cacheLock.Lock()
-		surfaceIx, isOk := cache[vec.End.X]
-		cacheLock.Unlock()
-		if isOk {
-			closestRelativePoint = surfaces[surfaceIx].GetIntersection(vec)
+	/*
+		if cache != nil {
+			cacheLock.Lock()
+			surfaceIx, isOk := cache[vec.End.X]
+			cacheLock.Unlock()
+			if isOk {
+				closestIntersection = surfaces[surfaceIx].GetIntersection(vec)
+				relativePoint = GetRelativePoint(vec.Start, closestIntersection)
+				//closestDist2 = GetDist2(vec.Start, closestIntersection)
+				resultIx = surfaceIx
+				return
+				//visited[surfaceIx] = true
+			}
 		}
-	}
+	*/
+	iter := 0
 	for {
-		subtree := tree.getTreeByPoint(travelingVec.Start)
+		iter++
+		subtree := tree.GetTreeByPoint(travelingVec.Start)
+		/*
+		subtreeF := tree.GetTreeByPointF(travelingVec.Start)
+		if subtree.Id != subtreeF.Id {
+			fmt.Printf("Tree discrepency: (%f, %f, %f)\n", travelingVec.Start.X, travelingVec.Start.Y, travelingVec.Start.Z)
+		}
+		*/
 		if subtree == nil {
 			return
 		}
 		for _, surfaceIx := range subtree.SurfaceIndices {
+			_, isOk := visited[surfaceIx]
+			if isOk {
+				continue
+			}
+			visited[surfaceIx] = true
 			intersection := surfaces[surfaceIx].GetIntersection(travelingVec)
 			if !math.IsNaN(intersection.X) {
 				currentDist2 := GetDist2(vec.Start, intersection)
@@ -339,14 +451,15 @@ func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sy
 		}
 		// Because surfaces can span multiple trees, it's possible we have an endpoint
 		// which is not the solution
-		if !math.IsNaN(closestIntersection.X) && subtree.Id == tree.getTreeByPoint(closestIntersection).Id {
-			closestRelativePoint = GetRelativePoint(vec.Start, closestIntersection)
+		if !math.IsNaN(closestIntersection.X) && subtree.Id == tree.GetTreeByPoint(closestIntersection).Id {
+			relativePoint = GetRelativePoint(vec.Start, closestIntersection)
 			isResult = true
 			if cache != nil {
 				cacheLock.Lock()
 				cache[vec.End.X] = resultIx
 				cacheLock.Unlock()
 			}
+			//fmt.Printf("Got result after %d iterations\n", iter)
 			return
 		}
 		neighbor := subtree.testBoundaries(travelingVec, startIx)
@@ -379,7 +492,10 @@ func (tree *Octree) testBoundaries(vec Vector, startIx int) (res Point) {
 		default:
 			return
 		}
-		res = boundary.GetIntersection(vec)
+		switch typedBoundary := boundary.(type) {
+		case *QuadSurface:
+			res = typedBoundary.GetIntersection(vec)
+		}
 		if !math.IsNaN(res.X) {
 			return
 		}
@@ -389,29 +505,20 @@ func (tree *Octree) testBoundaries(vec Vector, startIx int) (res Point) {
 
 func (tree *Octree) XMinBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P1: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P2: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMinF - MILLI,
+		},
+		P3: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
 	}
 	return
@@ -419,29 +526,20 @@ func (tree *Octree) XMinBoundary() (res Surface) {
 
 func (tree *Octree) XMaxBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P1: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P2: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMinF - MILLI,
+		},
+		P3: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
 	}
 	return
@@ -449,29 +547,20 @@ func (tree *Octree) XMaxBoundary() (res Surface) {
 
 func (tree *Octree) YMinBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P1: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P2: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
+		},
+		P3: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
 	}
 	return
@@ -479,29 +568,20 @@ func (tree *Octree) YMinBoundary() (res Surface) {
 
 func (tree *Octree) YMaxBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P1: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P2: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMinF - MILLI,
+		},
+		P3: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
 	}
 	return
@@ -509,29 +589,20 @@ func (tree *Octree) YMaxBoundary() (res Surface) {
 
 func (tree *Octree) ZMinBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P1: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMin - MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMin - MILLI,
-			},
+		P2: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMinF - MILLI,
+		},
+		P3: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMinF - MILLI,
 		},
 	}
 	return
@@ -539,29 +610,20 @@ func (tree *Octree) ZMinBoundary() (res Surface) {
 
 func (tree *Octree) ZMaxBoundary() (res Surface) {
 	res = &QuadSurface{
-		V1: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
-			End: Point{
-				X: tree.XMax + MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P1: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
-		V2: Vector{
-			Start: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMin - MILLI,
-				Z: tree.ZMax + MILLI,
-			},
-			End: Point{
-				X: tree.XMin - MILLI,
-				Y: tree.YMax + MILLI,
-				Z: tree.ZMax + MILLI,
-			},
+		P2: Point{
+			X: tree.XMaxF + MILLI,
+			Y: tree.YMinF - MILLI,
+			Z: tree.ZMaxF + MILLI,
+		},
+		P3: Point{
+			X: tree.XMinF - MILLI,
+			Y: tree.YMaxF + MILLI,
+			Z: tree.ZMaxF + MILLI,
 		},
 	}
 	return

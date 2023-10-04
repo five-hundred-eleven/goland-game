@@ -109,7 +109,7 @@ func NewGameFromFilename(filename string) (game *Game, err error) {
 		player.Game = game
 		player.Visited = make(map[int]bool)
 	}
-	surfaces := make([]Surface, len(gameData.Surfaces))
+	surfaces := make([]QuadSurface, len(gameData.Surfaces))
 	for i, surface := range gameData.Surfaces {
 		surfaces[i], err = SurfaceFromSurfaceData(surface)
 		if err != nil {
