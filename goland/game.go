@@ -21,8 +21,8 @@ const (
 	MILLI              = 1e-3
 	MICRO              = 1e-6
 	SHEARFACTOR        = 1.00
-	WINDOWWIDTH  int32 = 1280
-	WINDOWHEIGHT int32 = 960
+	WINDOWWIDTH  int32 = 320
+	WINDOWHEIGHT int32 = 240
 	VELOCITY           = 0.25
 	ROTVEL             = 0.075
 	WALLHEIGHT         = 2.5
@@ -74,6 +74,22 @@ type Player struct {
 type Ray struct {
 	PixelStart int32
 	Data       []byte
+}
+
+type FrontierPoint struct {
+	SurfaceId int
+	// TODO is this needed?
+	PixelId int32
+	X, Y    int32
+}
+
+type RenderingContext struct {
+	Xs, Ys, Zs             []float64
+	Width, Height          int32
+	tree                   *Octree
+	VisitedSurfaces        map[int][]int32
+	RayResults             []*RayResult
+	Frontier, NextFrontier []*FrontierPoint
 }
 
 func NewGameFromFilename(filename string) (game *Game, err error) {
@@ -160,8 +176,8 @@ func (p *Player) Move(factor float64) {
 			Z: p.Z,
 		},
 	}
-	_, _, isResult := tree.TraceVector(vec, nil, nil)
-	if !isResult {
+	result := tree.TraceVector(vec, nil, nil, []int{0, 1, 2, 3, 4, 5})
+	if result == nil {
 		p.X += xp
 	} else {
 		p.X -= xp
@@ -179,8 +195,8 @@ func (p *Player) Move(factor float64) {
 			Z: p.Z,
 		},
 	}
-	_, _, isResult = tree.TraceVector(vec, nil, nil)
-	if !isResult {
+	result = tree.TraceVector(vec, nil, nil, []int{0, 1, 2, 3, 4, 5})
+	if result == nil {
 		p.Y += yp
 	} else {
 		p.Y -= yp
@@ -206,7 +222,121 @@ func (p *Player) VectorFromThetas(HTheta, VTheta float64) (res Vector) {
 
 }
 
-func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player, cache map[float64]int, cacheLock *sync.Mutex) {
+func ExplorePixel(renderingCtx *RenderingContext, vec Vector, pixelId int32) (rayResult *RayResult) {
+
+	boundariesOrdering := []int{0, 0, 0, 0, 0, 0}
+	if vec.Start.X < vec.End.X {
+		boundariesOrdering[0] = 2
+		boundariesOrdering[3] = 4
+	} else {
+		boundariesOrdering[0] = 4
+		boundariesOrdering[3] = 2
+	}
+	if vec.Start.Y < vec.End.Y {
+		boundariesOrdering[1] = 3
+		boundariesOrdering[4] = 1
+	} else {
+		boundariesOrdering[1] = 1
+		boundariesOrdering[4] = 3
+	}
+	if vec.Start.Z < vec.End.Z {
+		boundariesOrdering[2] = 5
+		boundariesOrdering[5] = 0
+	} else {
+		boundariesOrdering[2] = 0
+		boundariesOrdering[5] = 5
+	}
+
+	rayResult = renderingCtx.tree.TraceVector(vec, nil, nil, boundariesOrdering)
+	if rayResult == nil {
+		return
+	}
+
+	pixelIds, isOk := renderingCtx.VisitedSurfaces[rayResult.SurfaceId]
+	if !isOk {
+		pixelIds = make([]int32, 1, 4)
+		pixelIds[0] = pixelId
+	} else {
+		pixelIds = append(pixelIds, pixelId)
+	}
+	renderingCtx.VisitedSurfaces[rayResult.SurfaceId] = pixelIds
+	renderingCtx.RayResults[rayResult.SurfaceId] = rayResult
+	return
+
+}
+
+func VisitIfUnvisited(renderingCtx *RenderingContext, fp *FrontierPoint) {
+	rayResult := renderingCtx.RayResults[fp.PixelId]
+	if rayResult != nil && rayResult.IsFinal {
+		return
+	}
+	pixelIds, isOk := renderingCtx.VisitedSurfaces[fp.SurfaceId]
+	if !isOk {
+		pixelIds = make([]int32, 1, 4)
+		pixelIds[0] = fp.PixelId
+	} else {
+		for _, visitedPixelId := range pixelIds {
+			if fp.PixelId == visitedPixelId {
+				return
+			}
+		}
+		pixelIds = append(pixelIds, fp.PixelId)
+	}
+	renderingCtx.VisitedSurfaces[fp.SurfaceId] = pixelIds
+	renderingCtx.NextFrontier = append(renderingCtx.NextFrontier, fp)
+	return
+}
+
+func ExpandPixel(renderingCtx *RenderingContext, fp *FrontierPoint) {
+
+	w := renderingCtx.Width
+	h := renderingCtx.Height
+	surfaceId := fp.SurfaceId
+	y := fp.Y
+	x := fp.X
+
+	if x > 0 {
+		fp := &FrontierPoint{
+			SurfaceId: surfaceId,
+			PixelId:   y*w + x - 1,
+			X:         x - 1,
+			Y:         y,
+		}
+		VisitIfUnvisited(renderingCtx, fp)
+	}
+	if x+1 < w {
+		fp := &FrontierPoint{
+			SurfaceId: surfaceId,
+			PixelId:   y*w + x + 1,
+			X:         x + 1,
+			Y:         y,
+		}
+		VisitIfUnvisited(renderingCtx, fp)
+	}
+	if y > 0 {
+		fp := &FrontierPoint{
+			SurfaceId: surfaceId,
+			PixelId:   (y-1)*w + x,
+			X:         x,
+			Y:         y - 1,
+		}
+		VisitIfUnvisited(renderingCtx, fp)
+	}
+	if y+1 < h {
+		fp := &FrontierPoint{
+			SurfaceId: surfaceId,
+			PixelId:   (y+1)*w + x,
+			X:         x,
+			Y:         y + 1,
+		}
+		VisitIfUnvisited(renderingCtx, fp)
+	}
+
+	return
+
+}
+
+func DoRender(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentIx int32, game *Game, player *Player, cache map[float64]int, cacheLock *sync.Mutex) {
 	defer func() {
 		completedCh <- segmentIx
 	}()
@@ -218,7 +348,7 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 	YStart := segment.Y
 	XStop := XStart + width
 	YStop := YStart + height
-	XOffset := screen.XOffsets[segmentIx]
+	//XOffset := screen.XOffsets[segmentIx]
 	HAngles := screen.HAngles
 	VAngles := screen.VAngles
 
@@ -229,63 +359,117 @@ func doRaytrace(completedCh chan int32, rayCh chan Ray, screen *Screen, segmentI
 
 	xs := make([]float64, width)
 	ys := make([]float64, width)
-	for x := XStart; x < XStop; x++ {
-		HTheta := AddAndNormalize(player.HTheta, HAngles[x])
+	zs := make([]float64, height)
+
+	// visitedSurfaces is a map of surface IDs to pixels that have visited them
+	visitedSurfaces := make(map[int][]int32)
+	rayResults := make([]*RayResult, height*width)
+	nextFrontier := make([]*FrontierPoint, 0, 1024)
+
+	renderingCtx := &RenderingContext{}
+	renderingCtx.Xs = xs
+	renderingCtx.Ys = ys
+	renderingCtx.Zs = zs
+	renderingCtx.Width = width
+	renderingCtx.Height = height
+	renderingCtx.tree = tree
+	renderingCtx.VisitedSurfaces = visitedSurfaces
+	renderingCtx.RayResults = rayResults
+	renderingCtx.NextFrontier = nextFrontier
+
+	//pixels := make([]byte, height*width*4)
+
+	for xi := XStart; xi < XStop; xi++ {
+		HTheta := AddAndNormalize(player.HTheta, HAngles[xi])
+		x := xi - XStart
 		xs[x] = vec.Start.X + math.Sin(HTheta)*4096.0
 		ys[x] = vec.Start.Y + math.Cos(HTheta)*4096.0
 	}
-	for y := YStart; y < YStop; y++ {
-		rowStart := y * screen.Width * 4
-		data := make([]byte, width*4)
-		/*
-			isUpper := math.Signbit(screen.VAngles[y])
-				abssin := math.Abs(math.Sin(screen.VAngles[y]))
-				floorDist := math.NaN()
-				ceilDist := math.NaN()
-				if !isUpper {
-					floorDist = math.Abs(FLOORHEIGHT / math.Tan(screen.VAngles[y]))
-				} else {
-					ceilDist = math.Abs(CEILHEIGHT / math.Tan(screen.VAngles[y]))
-				}
-		*/
-		VTheta := AddAndNormalize(player.VTheta, VAngles[y])
-		vec.End.Z = player.Z + math.Cos(VTheta)*4096.0
-		for xi := XStart; xi < XStop; xi++ {
-			x := (xi + XOffset) % width
-			pixelStart := x * 4
+	for yi := YStart; yi < YStop; yi++ {
+		VTheta := AddAndNormalize(player.VTheta, VAngles[yi])
+		y := yi - YStart
+		zs[y] = player.Z + math.Cos(VTheta)*4096.0
+	}
+	for y := int32(4); y < height; y += 8 {
+		vec.End.Z = zs[y]
+		for x := int32(4); x < width; x += 8 {
+			pixelId := y*width + x
 			vec.End.X = xs[x]
 			vec.End.Y = ys[x]
-			color := tree.TraceVectorToColor(vec, cache, cacheLock)
-			data[pixelStart] = color.B
-			data[pixelStart+1] = color.G
-			data[pixelStart+2] = color.R
-			/*
-				if isUpper {
-					if ceilDist < 256 {
-						rayvec := rotated[col]
-						ceilpoint1 := Advance(rayvec, ceilDist)
-						if player.GetVisited(ceilpoint1.X, ceilpoint1.Y) {
-							data[colStart] = 0
-							data[colStart+1] = 0
-							data[colStart+2] = 255
-							continue
-						}
-					}
-				} else {
-					if floorDist < 256 {
-						logdist := math.Log(floorDist)
-						r := byte(34 - logdist*7)
-						g := byte(34 - logdist*6)
-						b := byte(34 - logdist*5)
-						data[colStart] = b
-						data[colStart+1] = g
-						data[colStart+2] = r
+			rayResult := ExplorePixel(renderingCtx, vec, pixelId)
+			if rayResult == nil {
+				continue
+			}
+			fp := &FrontierPoint{
+				SurfaceId: rayResult.SurfaceId,
+				PixelId:   pixelId,
+				X:         x,
+				Y:         y,
+			}
+			ExpandPixel(renderingCtx, fp)
+		}
+	}
+	for {
+		if len(renderingCtx.NextFrontier) == 0 {
+			break
+		}
+		renderingCtx.Frontier = renderingCtx.NextFrontier
+		renderingCtx.NextFrontier = make([]*FrontierPoint, 0, len(renderingCtx.Frontier)*4)
+		for _, fp := range renderingCtx.Frontier {
+			surface := tree.Surfaces[fp.SurfaceId]
+			vec.End.X = xs[fp.X]
+			vec.End.Y = ys[fp.X]
+			vec.End.Z = zs[fp.Y]
+			var rayResult *RayResult
+			intersection := surface.GetIntersection(vec)
+			if math.IsNaN(intersection.X) {
+				continue
+				/*
+					rayResult = ExplorePixel(renderingCtx, vec, fp.PixelId)
+					if rayResult == nil {
 						continue
 					}
-				}
-			*/
+				*/
+			}
+			dist2 := GetDist2(vec.Start, intersection)
+			if rayResults[fp.PixelId] != nil && dist2 > rayResults[fp.PixelId].Dist2 {
+				continue
+			}
+			rayResult = &RayResult{
+				Intersection: intersection,
+				Dist2:        dist2,
+				SurfaceId:    fp.SurfaceId,
+				IsFinal:      false,
+			}
+			rayResults[fp.PixelId] = rayResult
+			fp = &FrontierPoint{
+				SurfaceId: fp.SurfaceId,
+				PixelId:   fp.PixelId,
+				X:         fp.X,
+				Y:         fp.Y,
+			}
+			ExpandPixel(renderingCtx, fp)
 		}
-		rayCh <- Ray{rowStart, data}
+	}
+	for yi := YStart; yi < YStop; yi++ {
+		y := yi - YStart
+		data := make([]byte, width*4)
+		for x := int32(0); x < width; x++ {
+			pixelId := y*width + x
+			rayResult := rayResults[pixelId]
+			if rayResult == nil {
+				data[x*4+2] = 0
+				data[x*4+1] = 0
+				data[x*4] = 0
+				continue
+			}
+			surface := tree.Surfaces[rayResult.SurfaceId]
+			c := surface.GetColor(rayResult)
+			data[x*4+2] = c.R
+			data[x*4+1] = c.B
+			data[x*4] = c.G
+		}
+		rayCh <- Ray{yi * width * 4, data}
 	}
 }
 
@@ -379,7 +563,7 @@ func DoMaze(recvCh chan int, sendCh chan int, screen *Screen, game *Game) {
 				return
 			}
 			for i := int32(0); i < NUMWORKERS; i++ {
-				go doRaytrace(completedCh, rayCh, screen, i, game, player, cache, cacheLock)
+				go DoRender(completedCh, rayCh, screen, i, game, player, cache, cacheLock)
 			}
 			pixels, _, err := targetTexture.Lock(nil)
 			if err != nil {

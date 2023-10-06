@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+var NaN = math.NaN()
+
 type Octree struct {
 	Id                   int
 	SurfaceIndices       []int
@@ -98,7 +100,7 @@ func (tree *Octree) getSurfacesInTree(surfaces []QuadSurface, parentSurfaceIndic
 				Start: points[jx],
 				End:   points[kx],
 			}
-			neighbor := tree.testBoundaries(vec, 0)
+			neighbor := tree.testBoundaries(vec, []int{0, 1, 2, 3, 4, 5})
 			if !math.IsNaN(neighbor.X) {
 				//fmt.Printf("Storing surface in tree by intersection: %d\n", tree.Id)
 				res = append(res, ix)
@@ -360,55 +362,35 @@ func (root *Octree) GetTreeByPoint(point Point) (res *Octree) {
 
 }
 
-func (tree *Octree) TraceVectorToColor(vec Vector, cache map[float64]int, cacheLock *sync.Mutex) (col Color) {
-	surfaceIx, relativePoint, isResult := tree.TraceVector(vec, cache, cacheLock)
-	if !isResult {
+func (tree *Octree) TraceVectorToColor(vec Vector, cache map[float64]int, cacheLock *sync.Mutex, boundariesOrder []int) (col Color) {
+	result := tree.TraceVector(vec, cache, cacheLock, boundariesOrder)
+	if result == nil {
 		col.R = 0
 		col.G = 0
 		col.B = 0
 		return
 	}
-	col = tree.Surfaces[surfaceIx].GetColor(relativePoint)
+	col = tree.Surfaces[result.SurfaceId].GetColor(result)
 	return
 }
 
-func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sync.Mutex) (resultIx int, relativePoint Point, isResult bool) {
-	isResult = false
-	resultIx = -1
+func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sync.Mutex, boundariesOrder []int) (res *RayResult) {
 	surfaces := tree.Surfaces
-	closestDist2 := math.Pow(2048, 2)
 	travelingVec := vec
-	var closestIntersection Point
-	relativePoint.X = math.NaN()
-	relativePoint.Y = math.NaN()
-	relativePoint.Z = math.NaN()
-	startIx := 0
 	visited := make(map[int]bool)
-	if vec.Start.X <= vec.End.X {
-		if vec.Start.Y > vec.End.Y {
-			startIx = 1
-		} else {
-			startIx = 2
-		}
-	} else {
-		if vec.Start.Y <= vec.End.Y {
-			startIx = 3
-		} else {
-			startIx = 4
-		}
-	}
+	prevTreeId := tree.Id
 	/*
 		if cache != nil {
 			cacheLock.Lock()
-			surfaceIx, isOk := cache[vec.End.X]
+			surfaceId, isOk := cache[vec.End.X]
 			cacheLock.Unlock()
 			if isOk {
-				closestIntersection = surfaces[surfaceIx].GetIntersection(vec)
+				closestIntersection = surfaces[surfaceId].GetIntersection(vec)
 				relativePoint = GetRelativePoint(vec.Start, closestIntersection)
 				//closestDist2 = GetDist2(vec.Start, closestIntersection)
-				resultIx = surfaceIx
+				resultIx = surfaceId
 				return
-				//visited[surfaceIx] = true
+				//visited[surfaceId] = true
 			}
 		}
 	*/
@@ -416,53 +398,64 @@ func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sy
 	for {
 		iter++
 		subtree := tree.GetTreeByPoint(travelingVec.Start)
-		/*
-		subtreeF := tree.GetTreeByPointF(travelingVec.Start)
-		if subtree.Id != subtreeF.Id {
-			fmt.Printf("Tree discrepency: (%f, %f, %f)\n", travelingVec.Start.X, travelingVec.Start.Y, travelingVec.Start.Z)
-		}
-		*/
 		if subtree == nil {
 			return
 		}
-		for _, surfaceIx := range subtree.SurfaceIndices {
-			_, isOk := visited[surfaceIx]
+		if subtree.Id == prevTreeId {
+			//fmt.Printf("Got subtree with identical id: (%f, %f, %f) -> (%f, %f, %f)\n", vec.Start.X, vec.Start.Y, vec.Start.Z, vec.End.X, vec.End.Y, vec.End.Z)
+			return
+		}
+		prevTreeId = subtree.Id
+		/*
+			subtreeF := tree.GetTreeByPointF(travelingVec.Start)
+			if subtree.Id != subtreeF.Id {
+				fmt.Printf("Tree discrepency: (%f, %f, %f)\n", travelingVec.Start.X, travelingVec.Start.Y, travelingVec.Start.Z)
+			}
+		*/
+		for _, surfaceId := range subtree.SurfaceIndices {
+			_, isOk := visited[surfaceId]
 			if isOk {
 				continue
 			}
-			visited[surfaceIx] = true
-			intersection := surfaces[surfaceIx].GetIntersection(travelingVec)
+			visited[surfaceId] = true
+			intersection := surfaces[surfaceId].GetIntersection(travelingVec)
 			if !math.IsNaN(intersection.X) {
 				currentDist2 := GetDist2(vec.Start, intersection)
 				/*
 					if cache != nil {
-						if !cache.Contains(surfaceIx) {
-							cache.Insort(surfaceIx, currentDist2)
+						if !cache.Contains(surfaceId) {
+							cache.Insort(surfaceId, currentDist2)
 						}
 					}
 				*/
-				if currentDist2 <= closestDist2 {
-					closestDist2 = currentDist2
-					resultIx = surfaceIx
-					closestIntersection = intersection
-					//fmt.Printf("Setting closestIx: %d\n", resultIx)
+				if res == nil {
+					res = &RayResult{
+						Intersection: intersection,
+						Dist2:        currentDist2,
+						SurfaceId:    surfaceId,
+						IsFinal:      true,
+					}
+				} else if currentDist2 < res.Dist2 {
+					res.Intersection = intersection
+					res.Dist2 = currentDist2
+					res.SurfaceId = surfaceId
 				}
 			}
 		}
 		// Because surfaces can span multiple trees, it's possible we have an endpoint
 		// which is not the solution
-		if !math.IsNaN(closestIntersection.X) && subtree.Id == tree.GetTreeByPoint(closestIntersection).Id {
-			relativePoint = GetRelativePoint(vec.Start, closestIntersection)
-			isResult = true
-			if cache != nil {
-				cacheLock.Lock()
-				cache[vec.End.X] = resultIx
-				cacheLock.Unlock()
-			}
+		if res != nil && subtree.Id == tree.GetTreeByPoint(res.Intersection).Id {
+			/*
+				if cache != nil {
+					cacheLock.Lock()
+					cache[vec.End.X] = resultIx
+					cacheLock.Unlock()
+				}
+			*/
 			//fmt.Printf("Got result after %d iterations\n", iter)
 			return
 		}
-		neighbor := subtree.testBoundaries(travelingVec, startIx)
+		neighbor := subtree.testBoundaries(travelingVec, boundariesOrder)
 		if math.IsNaN(neighbor.X) {
 			return
 		}
@@ -470,13 +463,13 @@ func (tree *Octree) TraceVector(vec Vector, cache map[float64]int, cacheLock *sy
 	}
 }
 
-func (tree *Octree) testBoundaries(vec Vector, startIx int) (res Point) {
-	res.X = math.NaN()
-	res.Y = math.NaN()
-	res.Z = math.NaN()
-	for i := 0; i < 6; i++ {
-		var boundary Surface
-		switch (startIx + i) % 6 {
+func (tree *Octree) testBoundaries(vec Vector, ordering []int) (res Point) {
+	res.X = NaN
+	res.Y = NaN
+	res.Z = NaN
+	for i := range ordering {
+		var boundary *QuadSurface
+		switch i {
 		case 0:
 			boundary = tree.ZMinBoundary()
 		case 1:
@@ -492,137 +485,135 @@ func (tree *Octree) testBoundaries(vec Vector, startIx int) (res Point) {
 		default:
 			return
 		}
-		switch typedBoundary := boundary.(type) {
-		case *QuadSurface:
-			res = typedBoundary.GetIntersection(vec)
-		}
+		res = boundary.GetIntersection(vec)
 		if !math.IsNaN(res.X) {
+			//fmt.Printf("Got result: at i=%d, startIx=%d\n", i, startIx)
 			return
 		}
 	}
 	return
 }
 
-func (tree *Octree) XMinBoundary() (res Surface) {
+func (tree *Octree) XMinBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
 			X: tree.XMinF - MILLI,
-			Y: tree.YMinF - MILLI,
-			Z: tree.ZMinF - MILLI,
+			Y: tree.YMinF,
+			Z: tree.ZMinF,
 		},
 		P2: Point{
 			X: tree.XMinF - MILLI,
-			Y: tree.YMaxF + MILLI,
-			Z: tree.ZMinF - MILLI,
+			Y: tree.YMaxF,
+			Z: tree.ZMinF,
 		},
 		P3: Point{
 			X: tree.XMinF - MILLI,
-			Y: tree.YMinF - MILLI,
-			Z: tree.ZMaxF + MILLI,
+			Y: tree.YMinF,
+			Z: tree.ZMaxF,
 		},
 	}
 	return
 }
 
-func (tree *Octree) XMaxBoundary() (res Surface) {
+func (tree *Octree) XMaxBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
 			X: tree.XMaxF + MILLI,
-			Y: tree.YMinF - MILLI,
-			Z: tree.ZMinF - MILLI,
+			Y: tree.YMinF,
+			Z: tree.ZMinF,
 		},
 		P2: Point{
 			X: tree.XMaxF + MILLI,
-			Y: tree.YMaxF + MILLI,
-			Z: tree.ZMinF - MILLI,
+			Y: tree.YMaxF,
+			Z: tree.ZMinF,
 		},
 		P3: Point{
 			X: tree.XMaxF + MILLI,
-			Y: tree.YMinF - MILLI,
-			Z: tree.ZMaxF + MILLI,
+			Y: tree.YMinF,
+			Z: tree.ZMaxF,
 		},
 	}
 	return
 }
 
-func (tree *Octree) YMinBoundary() (res Surface) {
+func (tree *Octree) YMinBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
-			X: tree.XMinF - MILLI,
+			X: tree.XMinF,
 			Y: tree.YMinF - MILLI,
-			Z: tree.ZMinF - MILLI,
+			Z: tree.ZMinF,
 		},
 		P2: Point{
-			X: tree.XMaxF + MILLI,
+			X: tree.XMaxF,
 			Y: tree.YMinF - MILLI,
-			Z: tree.ZMinF - MILLI,
+			Z: tree.ZMinF,
 		},
 		P3: Point{
-			X: tree.XMinF - MILLI,
+			X: tree.XMinF,
 			Y: tree.YMinF - MILLI,
-			Z: tree.ZMaxF + MILLI,
+			Z: tree.ZMaxF,
 		},
 	}
 	return
 }
 
-func (tree *Octree) YMaxBoundary() (res Surface) {
+func (tree *Octree) YMaxBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
-			X: tree.XMinF - MILLI,
+			X: tree.XMinF,
 			Y: tree.YMaxF + MILLI,
-			Z: tree.ZMinF - MILLI,
+			Z: tree.ZMinF,
 		},
 		P2: Point{
-			X: tree.XMaxF + MILLI,
+			X: tree.XMaxF,
 			Y: tree.YMaxF + MILLI,
-			Z: tree.ZMinF - MILLI,
+			Z: tree.ZMinF,
 		},
 		P3: Point{
-			X: tree.XMinF - MILLI,
+			X: tree.XMinF,
 			Y: tree.YMaxF + MILLI,
-			Z: tree.ZMaxF + MILLI,
+			Z: tree.ZMaxF,
 		},
 	}
 	return
 }
 
-func (tree *Octree) ZMinBoundary() (res Surface) {
+func (tree *Octree) ZMinBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
-			X: tree.XMinF - MILLI,
-			Y: tree.YMinF - MILLI,
+			X: tree.XMinF,
+			Y: tree.YMinF,
 			Z: tree.ZMinF - MILLI,
 		},
 		P2: Point{
-			X: tree.XMaxF + MILLI,
-			Y: tree.YMinF - MILLI,
+			X: tree.XMaxF,
+			Y: tree.YMinF,
 			Z: tree.ZMinF - MILLI,
 		},
 		P3: Point{
-			X: tree.XMinF - MILLI,
-			Y: tree.YMaxF + MILLI,
+			X: tree.XMinF,
+			Y: tree.YMaxF,
 			Z: tree.ZMinF - MILLI,
 		},
 	}
 	return
 }
 
-func (tree *Octree) ZMaxBoundary() (res Surface) {
+func (tree *Octree) ZMaxBoundary() (res *QuadSurface) {
 	res = &QuadSurface{
 		P1: Point{
-			X: tree.XMinF - MILLI,
-			Y: tree.YMinF - MILLI,
+			X: tree.XMinF,
+			Y: tree.YMinF,
 			Z: tree.ZMaxF + MILLI,
 		},
 		P2: Point{
-			X: tree.XMaxF + MILLI,
-			Y: tree.YMinF - MILLI,
+			X: tree.XMaxF,
+			Y: tree.YMinF,
 			Z: tree.ZMaxF + MILLI,
 		},
 		P3: Point{
-			X: tree.XMinF - MILLI,
-			Y: tree.YMaxF + MILLI,
+			X: tree.XMinF,
+			Y: tree.YMaxF,
 			Z: tree.ZMaxF + MILLI,
 		},
 	}

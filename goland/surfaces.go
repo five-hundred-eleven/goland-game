@@ -44,6 +44,13 @@ type QuadSurface struct {
 	Color      Color
 }
 
+type RayResult struct {
+	Intersection Point
+	Dist2        float64
+	SurfaceId    int
+	IsFinal      bool
+}
+
 func SurfaceFromSurfaceData(sd SurfaceData) (res QuadSurface, err error) {
 	if len(sd) == 4 {
 		res = QuadSurface{}
@@ -76,20 +83,20 @@ func (s SegmentSurface) GetIntersection(vec Vector) (intersection Point) {
 	d := (s.Start.X-s.End.X)*(vec.Start.Y-vec.End.Y) - (s.Start.Y-s.End.Y)*(vec.Start.X-vec.End.X)
 
 	if math.Abs(d) < 1e-6 {
-		intersection.X = math.NaN()
+		intersection.X = NaN
 		intersection.Y = intersection.X
 		return
 	}
 
 	tn := (s.Start.X-vec.Start.X)*(vec.Start.Y-vec.End.Y) - (s.Start.Y-vec.Start.Y)*(vec.Start.X-vec.End.X)
 	if math.Signbit(d) != math.Signbit(tn) || math.Abs(d) < math.Abs(tn) {
-		intersection.X = math.NaN()
+		intersection.X = NaN
 		intersection.Y = intersection.X
 		return
 	}
 	un := (s.Start.X-vec.Start.X)*(s.Start.Y-s.End.Y) - (s.Start.Y-vec.Start.Y)*(s.Start.X-s.End.X)
 	if math.Signbit(d) != math.Signbit(un) || math.Abs(d) < math.Abs(un) {
-		intersection.X = math.NaN()
+		intersection.X = NaN
 		intersection.Y = intersection.X
 		return
 	}
@@ -137,11 +144,7 @@ func (s *SegmentSurface) SetColor(color Color) {
 	s.Color = color
 }
 
-func (qs QuadSurface) GetIntersection(vec Vector) (res Point) {
-
-	res.X = math.NaN()
-	res.Y = math.NaN()
-	res.Z = math.NaN()
+func (qs *QuadSurface) GetIntersection(vec Vector) (res Point) {
 
 	lba := VectorSub(vec.Start, vec.End)
 	v01 := VectorSub(qs.P2, qs.P1)
@@ -149,33 +152,43 @@ func (qs QuadSurface) GetIntersection(vec Vector) (res Point) {
 	cross12 := VectorCross(v01, v02)
 	det := VectorDot(lba, cross12)
 	if math.Abs(det) < MICRO {
+		res.X = NaN
+		res.Y = NaN
+		res.Z = NaN
 		return
 	}
 
 	diffStart := VectorSub(vec.Start, qs.P1)
 	tn := VectorDot(cross12, diffStart)
 	if math.Signbit(tn) != math.Signbit(det) || math.Abs(det) < math.Abs(tn) {
+		res.X = NaN
+		res.Y = NaN
+		res.Z = NaN
 		return
 	}
 	coefU := VectorCross(v02, lba)
 	un := VectorDot(coefU, diffStart)
 	if math.Signbit(un) != math.Signbit(det) || math.Abs(det) < math.Abs(un) {
+		res.X = NaN
+		res.Y = NaN
+		res.Z = NaN
 		return
 	}
 	coefV := VectorCross(lba, v01)
 	vn := VectorDot(coefV, diffStart)
 	if math.Signbit(vn) != math.Signbit(det) || math.Abs(det) < math.Abs(vn) {
+		res.X = NaN
+		res.Y = NaN
+		res.Z = NaN
 		return
 	}
 
 	lab := VectorSub(vec.End, vec.Start)
 	t := tn / det
 
-	res = Point{
-		X: vec.Start.X + lab.X*t,
-		Y: vec.Start.Y + lab.Y*t,
-		Z: vec.Start.Z + lab.Z*t,
-	}
+	res.X = vec.Start.X + lab.X*t
+	res.Y = vec.Start.Y + lab.Y*t
+	res.Z = vec.Start.Z + lab.Z*t
 
 	return
 
@@ -190,9 +203,8 @@ func (qs *QuadSurface) GetPoints() (res []Point) {
 	return
 }
 
-func (qs *QuadSurface) GetColor(relativePoint Point) (res Color) {
-	dist := relativePoint.X*relativePoint.X + relativePoint.Y*relativePoint.Y + relativePoint.Z*relativePoint.Z
-	dist = math.Sqrt(dist)
+func (qs *QuadSurface) GetColor(rayResult *RayResult) (res Color) {
+	dist := math.Sqrt(rayResult.Dist2)
 	dist = math.Min(math.Log(dist)*45, 215.0)
 	res = qs.Color
 	res.R -= byte(dist - 0.5)
